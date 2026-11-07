@@ -6,6 +6,8 @@
 
 #include <FluentQtWidgets/Settings/SettingCard.h>
 #include <FluentQtWidgets/Widgets/CardWidget.h>
+#include <FluentQtWidgets/Widgets/Label.h>
+#include <FluentQtWidgets/Widgets/LineEdit.h>
 #include <FluentQtWidgets/Widgets/Menu.h>
 #include <FluentQtWidgets/Widgets/ScrollArea.h>
 
@@ -13,6 +15,7 @@
 #include <QtCore/QFileInfo>
 #include <QtCore/QJsonDocument>
 #include <QtCore/QMap>
+#include <QtCore/QEvent>
 #include <QtCore/QObject>
 #include <QtCore/QPair>
 #include <QtCore/QTimer>
@@ -24,7 +27,11 @@
 #include <QtWidgets/QBoxLayout>
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QVBoxLayout>
+#include <QtCore/QtMath>
 #include <QtGui/QPainter>
+#include <QtGui/QResizeEvent>
+#include <QtGui/QTextCursor>
+#include <QtGui/QTextDocument>
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
 #include <QtGui/QEnterEvent>
 #endif
@@ -149,6 +156,112 @@ QString elidePreviewText(const QString &text, int maxChars = 480)
     return text.left(maxChars).trimmed() + QStringLiteral("…");
 }
 
+void applyQuickCommandWrappingLabel(FluentLabelBase *label)
+{
+    if (!label) {
+        return;
+    }
+    label->setWordWrap(true);
+    label->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    label->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    label->setMinimumWidth(0);
+}
+
+/** 按控件宽度排版换行（不依赖 QLabel 的 sizeHint，避免长串始终单行）。 */
+class QuickCommandPreviewPane final : public QWidget
+{
+  public:
+    explicit QuickCommandPreviewPane(QWidget *parent = nullptr) : QWidget(parent)
+    {
+        setObjectName(QStringLiteral("qcPreviewBody"));
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        setMinimumWidth(0);
+        setFocusPolicy(Qt::NoFocus);
+        m_doc.setDocumentMargin(0);
+        QTextOption opt;
+        opt.setWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
+        m_doc.setDefaultTextOption(opt);
+        BodyLabel fontProbe(this);
+        fontProbe.hide();
+        m_doc.setDefaultFont(fontProbe.font());
+    }
+
+    void setPreviewText(const QString &text, bool muted)
+    {
+        m_muted = muted;
+        m_doc.setPlainText(text);
+        applyTextColor();
+        refreshLayout();
+        update();
+    }
+
+    void refreshLayout()
+    {
+        if (width() > 2) {
+            m_doc.setTextWidth(width());
+        }
+        const int h =
+            qMax(fontMetrics().height() + 2, static_cast<int>(qCeil(m_doc.size().height())) + 2);
+        setFixedHeight(h);
+    }
+
+  protected:
+    void resizeEvent(QResizeEvent *event) override
+    {
+        QWidget::resizeEvent(event);
+        refreshLayout();
+    }
+
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter painter(this);
+        painter.setClipRect(rect());
+        m_doc.drawContents(&painter, QRectF(0, 0, width(), height()));
+    }
+
+  private:
+    QTextDocument m_doc;
+    bool m_muted = false;
+
+    void applyTextColor()
+    {
+        const bool dark = ThemeManager::instance()->effectiveTheme() == Theme::Dark;
+        QTextCharFormat fmt;
+        if (m_muted) {
+            const int g = dark ? 180 : 96;
+            fmt.setForeground(QColor(g, g, g));
+        } else {
+            fmt.setForeground(palette().color(QPalette::WindowText));
+        }
+        QTextCursor cursor(&m_doc);
+        cursor.select(QTextCursor::Document);
+        cursor.mergeCharFormat(fmt);
+    }
+};
+
+QuickCommandPreviewPane *findQuickCommandPreviewPane(QWidget *scope)
+{
+    if (!scope) {
+        return nullptr;
+    }
+    auto *w = scope->findChild<QWidget *>(QStringLiteral("qcPreviewBody"));
+    return dynamic_cast<QuickCommandPreviewPane *>(w);
+}
+
+void relayoutAllQuickCommandPreviews(QWidget *listHost)
+{
+    if (!listHost) {
+        return;
+    }
+    const auto panes = listHost->findChildren<QWidget *>(QStringLiteral("qcPreviewBody"));
+    for (QWidget *w : panes) {
+        if (auto *pane = dynamic_cast<QuickCommandPreviewPane *>(w)) {
+            pane->refreshLayout();
+            pane->update();
+        }
+    }
+}
+
 /** Lift nested folders under one folder into flat command rows (single folder level). */
 void flattenFolderChildrenJson(QJsonArray &children)
 {
@@ -250,13 +363,16 @@ void setQuickCommandRowPreview(QWidget *rowWidget, const QVariantMap &map)
     if (!rowWidget) {
         return;
     }
-    auto *preview = rowWidget->findChild<QLabel *>(QStringLiteral("qcPreviewBody"));
+    auto *preview = findQuickCommandPreviewPane(rowWidget);
     auto *incomplete = rowWidget->findChild<QLabel *>(QStringLiteral("qcIncompleteHint"));
-    auto *flPreview = preview ? static_cast<FluentLabelBase *>(preview) : nullptr;
     auto *flIncomplete = incomplete ? static_cast<FluentLabelBase *>(incomplete) : nullptr;
-    if (!flPreview) {
+    if (!preview) {
         return;
     }
+    const auto applyPreview = [&](const QString &text, bool muted) {
+        preview->setPreviewText(text, muted);
+        QTimer::singleShot(0, preview, [preview]() { preview->refreshLayout(); });
+    };
     const bool isTemplate = map.value(QStringLiteral("template")).toBool();
     if (!isTemplate) {
         if (flIncomplete) {
@@ -264,11 +380,9 @@ void setQuickCommandRowPreview(QWidget *rowWidget, const QVariantMap &map)
         }
         const QString raw = map.value(QStringLiteral("payload")).toString();
         if (raw.trimmed().isEmpty()) {
-            flPreview->setText(AppI18n::text("（空）"));
-            AppUi::setMutedTextColor(flPreview);
+            applyPreview(AppI18n::text("（空）"), true);
         } else {
-            flPreview->setText(elidePreviewText(raw));
-            flPreview->setTextColor(QColor(), QColor());
+            applyPreview(elidePreviewText(raw), false);
         }
         return;
     }
@@ -281,20 +395,18 @@ void setQuickCommandRowPreview(QWidget *rowWidget, const QVariantMap &map)
             flIncomplete->setText(AppI18n::text("填写参数后可预览完整内容"));
             flIncomplete->show();
         }
-        flPreview->setText(
-            elidePreviewText(resolved.isEmpty() ? map.value(QStringLiteral("templateText")).toString() : resolved));
-        AppUi::setMutedTextColor(flPreview);
+        applyPreview(elidePreviewText(resolved.isEmpty() ? map.value(QStringLiteral("templateText")).toString()
+                                                         : resolved),
+                     true);
         return;
     }
     if (flIncomplete) {
         flIncomplete->hide();
     }
     if (resolved.trimmed().isEmpty()) {
-        flPreview->setText(AppI18n::text("（空）"));
-        AppUi::setMutedTextColor(flPreview);
+        applyPreview(AppI18n::text("（空）"), true);
     } else {
-        flPreview->setText(elidePreviewText(resolved));
-        flPreview->setTextColor(QColor(), QColor());
+        applyPreview(elidePreviewText(resolved), false);
     }
 }
 
@@ -307,6 +419,8 @@ SimpleCardWidget *buildCommandRowWidget(const QVariantMap &map, bool isTemplate)
 
     auto *inner = new QWidget(card);
     inner->setObjectName(QStringLiteral("qcCommandInner"));
+    inner->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    card->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     auto *vl = new QVBoxLayout(inner);
     vl->setContentsMargins(10, 8, 10, 8);
     vl->setSpacing(8);
@@ -319,6 +433,7 @@ SimpleCardWidget *buildCommandRowWidget(const QVariantMap &map, bool isTemplate)
     hlTop->setContentsMargins(0, 0, 0, 0);
     hlTop->setSpacing(8);
     auto *title = new StrongBodyLabel(displayName, titleRow);
+    applyQuickCommandWrappingLabel(title);
     hlTop->addWidget(title, 1);
 
     auto *meta = new CaptionLabel(
@@ -373,12 +488,10 @@ SimpleCardWidget *buildCommandRowWidget(const QVariantMap &map, bool isTemplate)
     incomplete->setObjectName(QStringLiteral("qcIncompleteHint"));
     incomplete->hide();
     AppUi::setMutedTextColor(incomplete);
+    applyQuickCommandWrappingLabel(incomplete);
     vl->addWidget(incomplete);
 
-    auto *preview = new BodyLabel(inner);
-    preview->setObjectName(QStringLiteral("qcPreviewBody"));
-    preview->setWordWrap(true);
-    preview->setMaximumHeight(120);
+    auto *preview = new QuickCommandPreviewPane(inner);
 
     auto *cardLayout = new QVBoxLayout(card);
     cardLayout->setContentsMargins(6, 4, 6, 4);
@@ -635,10 +748,10 @@ void WorkbenchPage::setupQuickCommandsPanel(QWidget *terminalWidget, QSplitter *
     m_quickCommandsScroll->enableTransparentBackground();
 
     m_quickCommandsListHost = new QWidget(m_quickCommandsScroll);
+    m_quickCommandsListHost->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     m_quickCommandsListLayout = new QVBoxLayout(m_quickCommandsListHost);
     m_quickCommandsListLayout->setContentsMargins(0, 0, 0, 0);
     m_quickCommandsListLayout->setSpacing(10);
-    m_quickCommandsListLayout->setSizeConstraint(QLayout::SetMinAndMaxSize);
     m_quickCommandsListLayout->addStretch(1);
 
     m_quickCommandsScroll->setWidget(m_quickCommandsListHost);
@@ -700,6 +813,7 @@ void WorkbenchPage::onQuickCommandsSplitterMoved(int, int)
         AppSettings settings;
         settings.setValue(QStringLiteral("workbench/quickCommandsPanelWidth"), m_quickCommandsPanelWidth);
     }
+    relayoutAllQuickCommandPreviews(m_quickCommandsListHost);
 }
 
 void WorkbenchPage::applyQuickCommandRowPreview(QWidget *rowWidget)
@@ -1023,6 +1137,7 @@ void WorkbenchPage::rebuildQuickCommandsList()
     reinstallQuickCommandsClickFilters();
     updateQuickCommandsActionState();
     updateQuickCommandsSelectionHighlight();
+    QTimer::singleShot(0, this, [this]() { relayoutAllQuickCommandPreviews(m_quickCommandsListHost); });
 }
 
 void WorkbenchPage::quickCommandsJsonToItem(const QJsonObject &object)
