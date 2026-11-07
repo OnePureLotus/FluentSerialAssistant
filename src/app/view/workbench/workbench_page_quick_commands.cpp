@@ -497,8 +497,8 @@ class QuickCommandEditDialog : public QDialog
             QJsonArray hints;
             QJsonArray defaults;
             for (const ParamRow &row : m_paramRows) {
-                hints.append(row.first->text());
-                defaults.append(row.second->text());
+                hints.append(row.hint->text());
+                defaults.append(row.defaultValue->text());
             }
             m.insert(QStringLiteral("paramHintsJson"),
                      QString::fromUtf8(QJsonDocument(hints).toJson(QJsonDocument::Compact)));
@@ -511,7 +511,27 @@ class QuickCommandEditDialog : public QDialog
     }
 
   private:
-    using ParamRow = QPair<LineEdit *, LineEdit *>;
+    struct ParamRow {
+        QWidget *row = nullptr;
+        LineEdit *hint = nullptr;
+        LineEdit *defaultValue = nullptr;
+    };
+
+    void removeParamRow(QWidget *rowWidget)
+    {
+        if (!rowWidget || !m_paramLayout) {
+            return;
+        }
+        for (int i = 0; i < m_paramRows.size(); ++i) {
+            if (m_paramRows.at(i).row != rowWidget) {
+                continue;
+            }
+            m_paramLayout->removeWidget(rowWidget);
+            m_paramRows.removeAt(i);
+            rowWidget->deleteLater();
+            return;
+        }
+    }
 
     void addParamRow(const QString &hint, const QString &defVal)
     {
@@ -527,8 +547,15 @@ class QuickCommandEditDialog : public QDialog
         v->setText(defVal);
         hl->addWidget(h, 1);
         hl->addWidget(v, 1);
+        auto *removeBtn = new TransparentToolButton(icon(FluentIcon::Delete), row);
+        removeBtn->setFixedSize(CompactControlHeight, CompactControlHeight);
+        removeBtn->setIconSize(QSize(16, 16));
+        AppUi::setFluentToolTip(removeBtn, AppI18n::text("删除"), ToolTipPosition::Top);
+        removeBtn->setAccessibleName(AppI18n::text("删除"));
+        hl->addWidget(removeBtn, 0, Qt::AlignVCenter);
+        connect(removeBtn, &TransparentToolButton::clicked, this, [this, row]() { removeParamRow(row); });
         m_paramLayout->addWidget(row);
-        m_paramRows.append(ParamRow(h, v));
+        m_paramRows.append(ParamRow{row, h, v});
     }
 
     bool m_templateMode = false;
@@ -1466,12 +1493,10 @@ void WorkbenchPage::addQuickCommandsTemplateCommand()
     initial.insert(QStringLiteral("mode"), QStringLiteral("text"));
     initial.insert(QStringLiteral("lineEnding"), QStringLiteral("none"));
     initial.insert(QStringLiteral("enabled"), true);
-    initial.insert(QStringLiteral("templateText"), QStringLiteral("AT+OTA={{0}},{{1}}"));
+    initial.insert(QStringLiteral("templateText"), QStringLiteral("AT+CMD={{0}}"));
     QJsonArray h;
-    h.append(QStringLiteral("OTA 服务器地址"));
-    h.append(QStringLiteral("端口"));
+    h.append(AppI18n::text("参数"));
     QJsonArray d;
-    d.append(QString());
     d.append(QString());
     initial.insert(QStringLiteral("paramHintsJson"), QString::fromUtf8(QJsonDocument(h).toJson(QJsonDocument::Compact)));
     initial.insert(QStringLiteral("paramDefaultsJson"), QString::fromUtf8(QJsonDocument(d).toJson(QJsonDocument::Compact)));
