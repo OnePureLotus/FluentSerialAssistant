@@ -45,8 +45,10 @@
 #include <QtWidgets/QListWidgetItem>
 #include <QtWidgets/QPlainTextEdit>
 #include <QtWidgets/QScrollBar>
+#include <QtWidgets/QSplitter>
 #include <QtWidgets/QSizePolicy>
 #include <QtWidgets/QTextEdit>
+#include <QtWidgets/QTreeWidget>
 #include <QtWidgets/QVBoxLayout>
 
 #include <algorithm>
@@ -59,8 +61,13 @@ constexpr int FlushIntervalMs = 33;
 constexpr int DefaultMaxTerminalRecords = 20000;
 constexpr int MaxSendHistoryItems = 20;
 constexpr int MaxSendPacketItems = 100;
+constexpr int MaxQuickCommandItems = 200;
+constexpr int QuickCommandsPanelDefaultWidth = 300;
+constexpr int QuickCommandsPanelMinWidth = 220;
 constexpr int SidePanelWidth = 324;
 constexpr int TerminalPanelMinWidth = 560;
+constexpr int TerminalViewMinHeight = 120;
+constexpr int SendSectionMinHeight = 160;
 constexpr int ReconnectIntervalMs = 2000;
 constexpr int CompactControlHeight = 32;
 constexpr int FormLabelWidth = 84;
@@ -221,6 +228,21 @@ inline void makeCompactControl(QWidget *control)
     control->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
 }
 
+/** Square icon-only controls for toolbars; `makeCompactControl` uses Ignored width and can shrink to 0 in narrow splits. */
+inline void makeToolbarSquareButton(QWidget *control)
+{
+    control->setFixedSize(CompactControlHeight, CompactControlHeight);
+    control->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+}
+
+/** Text + optional dropdown: fixed height, non-zero minimum width so it stays visible in narrow panels. */
+inline void makeToolbarTextButton(QWidget *control, int minInnerWidth = 56)
+{
+    control->setMinimumWidth(minInnerWidth + 8);
+    control->setFixedHeight(CompactControlHeight);
+    control->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
+}
+
 inline LineEdit *createNumberEdit(QWidget *parent, int value, int minimum, int maximum)
 {
     auto *edit = new LineEdit(parent);
@@ -350,7 +372,7 @@ inline QString lineEndingLabel(const QString &lineEnding)
     if (lineEnding == QStringLiteral("crlf")) {
         return QStringLiteral("CRLF");
     }
-    return QStringLiteral("None");
+    return AppI18n::text("无换行");
 }
 
 inline QByteArray lineEndingBytes(const QString &lineEnding)

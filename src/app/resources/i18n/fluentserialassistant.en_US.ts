@@ -2961,6 +2961,190 @@ Installation log: %2</translation>
         <source>当前 %1 B / 需要 %2 B</source>
         <translation>Current %1 B / Required %2 B</translation>
     </message>
+    <message>
+        <source>常用命令</source>
+        <translation>Quick commands</translation>
+    </message>
+    <message>
+        <source>添加</source>
+        <translation>Add</translation>
+    </message>
+    <message>
+        <source>文件夹</source>
+        <translation>Folder</translation>
+    </message>
+    <message>
+        <source>固定命令</source>
+        <translation>Fixed command</translation>
+    </message>
+    <message>
+        <source>模板命令</source>
+        <translation>Template command</translation>
+    </message>
+    <message>
+        <source>编辑</source>
+        <translation>Edit</translation>
+    </message>
+    <message>
+        <source>发送</source>
+        <translation>Send</translation>
+    </message>
+    <message>
+        <source>命令</source>
+        <translation>Command</translation>
+    </message>
+    <message>
+        <source>（未命名）</source>
+        <translation>(Untitled)</translation>
+    </message>
+    <message>
+        <source>新命令</source>
+        <translation>New command</translation>
+    </message>
+    <message>
+        <source>添加固定命令</source>
+        <translation>Add fixed command</translation>
+    </message>
+    <message>
+        <source>名称不能为空</source>
+        <translation>Name cannot be empty</translation>
+    </message>
+    <message>
+        <source>新模板</source>
+        <translation>New template</translation>
+    </message>
+    <message>
+        <source>OTA 服务器地址</source>
+        <translation>OTA server address</translation>
+    </message>
+    <message>
+        <source>端口</source>
+        <translation>Port</translation>
+    </message>
+    <message>
+        <source>添加模板命令</source>
+        <translation>Add template command</translation>
+    </message>
+    <message>
+        <source>该命令已停用</source>
+        <translation>This command is disabled</translation>
+    </message>
+    <message>
+        <source>模板参数未填写或占位符未全部替换</source>
+        <translation>Fill all template parameters or replace every placeholder</translation>
+    </message>
+    <message>
+        <source>新建文件夹</source>
+        <translation>New folder</translation>
+    </message>
+    <message>
+        <source>名称：</source>
+        <translation>Name:</translation>
+    </message>
+    <message>
+        <source>新建分组</source>
+        <translation>New group</translation>
+    </message>
+    <message>
+        <source>重命名文件夹</source>
+        <translation>Rename folder</translation>
+    </message>
+    <message>
+        <source>编辑命令</source>
+        <translation>Edit command</translation>
+    </message>
+    <message>
+        <source>导入常用命令</source>
+        <translation>Import quick commands</translation>
+    </message>
+    <message>
+        <source>导出常用命令</source>
+        <translation>Export quick commands</translation>
+    </message>
+    <message>
+        <source>不是常用命令 JSON 格式</source>
+        <translation>Not a quick commands JSON file</translation>
+    </message>
+    <message>
+        <source>命令数量超过上限</source>
+        <translation>Too many commands</translation>
+    </message>
+    <message>
+        <source>确认删除</source>
+        <translation>Confirm delete</translation>
+    </message>
+    <message>
+        <source>确定删除该项及其子项？</source>
+        <translation>Delete this item and everything inside it?</translation>
+    </message>
+    <message>
+        <source>请先选择项目</source>
+        <translation>Select an item first</translation>
+    </message>
+    <message>
+        <source>常用命令数量已达上限</source>
+        <translation>Quick command limit reached</translation>
+    </message>
+    <message>
+        <source>模板（使用 {{0}} {{1}} 占位）</source>
+        <translation>Template (use {{0}} {{1}} placeholders)</translation>
+    </message>
+    <message>
+        <source>参数</source>
+        <translation>Parameters</translation>
+    </message>
+    <message>
+        <source>添加参数</source>
+        <translation>Add parameter</translation>
+    </message>
+    <message>
+        <source>内容</source>
+        <translation>Content</translation>
+    </message>
+    <message>
+        <source>提示（用于占位输入框）</source>
+        <translation>Hint (input placeholder)</translation>
+    </message>
+    <message>
+        <source>默认值</source>
+        <translation>Default value</translation>
+    </message>
+    <message>
+        <source>模式</source>
+        <translation>Mode</translation>
+    </message>
+    <message>
+        <source>无换行</source>
+        <translation>No newline</translation>
+    </message>
+    <message>
+        <source>参数 %1</source>
+        <translation>Parameter %1</translation>
+    </message>
+    <message>
+        <source>换行</source>
+        <translation>Newline</translation>
+    </message>
+    <message>
+        <source>发送预览</source>
+        <translation>Send preview</translation>
+    </message>
+    <message>
+        <source>（空）</source>
+        <translation>(empty)</translation>
+    </message>
+    <message>
+        <source>填写参数后可预览完整内容</source>
+        <translation>Fill parameters to preview the full payload</translation>
+    </message>
+    <message>
+        <source>添加文件夹或命令</source>
+        <translation>Add a folder or command</translation>
+    </message>
+    <message>
+        <source>含 %1 条命令</source>
+        <translation>%1 command(s)</translation>
+    </message>
 </context>
 <context>
     <name>FluentQt::RealtimePlotWidget</name>

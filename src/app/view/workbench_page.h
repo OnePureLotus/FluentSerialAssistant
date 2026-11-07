@@ -9,6 +9,8 @@
 #include "app/serial/serial_controller.h"
 #include "app/view/app_page.h"
 
+#include <QtCore/QJsonArray>
+#include <QtCore/QJsonObject>
 #include <QtCore/QDateTime>
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QFile>
@@ -22,12 +24,19 @@
 
 class QEvent;
 class QHideEvent;
+class QShowEvent;
 class QTextCharFormat;
 class QTextCursor;
 class QThread;
 class QWheelEvent;
+class QSplitter;
+class QVBoxLayout;
 class DataTableWindow;
 class ScriptRunner;
+namespace FluentQt {
+class ExpandSettingCard;
+class SimpleCardWidget;
+}
 struct DataTableRecord;
 class QuickPlotWindow;
 class ProtocolTemplateWindow;
@@ -72,6 +81,7 @@ class WorkbenchPage : public AppPage, public AppControl::SessionControl
     friend class VirtualSerialWorkbenchTest;
 
     bool eventFilter(QObject *watched, QEvent *event) override;
+    void showEvent(QShowEvent *event) override;
     void hideEvent(QHideEvent *event) override;
 
     QWidget *createWorkbench();
@@ -209,6 +219,9 @@ class WorkbenchPage : public AppPage, public AppControl::SessionControl
     void updateRateStats();
     void updateReceiveModeButton();
     void updateSendModeButton();
+    void applyTerminalSendSplitterSizes();
+    void updateSendQuickSuffixChecks();
+    void syncSendQuickSuffixChecksFromLineEndingCombo();
     void updateHistoryCombo();
     void applyHistoryItem(int index);
     void updatePacketTable(int selectedRow = -1);
@@ -224,6 +237,44 @@ class WorkbenchPage : public AppPage, public AppControl::SessionControl
     bool sendPacketPayload(const SendPacket &packet);
     void importSendPackets();
     void exportSendPackets();
+
+    void setupQuickCommandsPanel(QWidget *terminalWidget, QSplitter *splitter);
+    void toggleQuickCommandsPanel(bool visible);
+    void onQuickCommandsSplitterMoved(int pos, int index);
+    void loadQuickCommands();
+    /** Persist quick-commands tree. When @p publishToOtherPages is false, skips cross-page reload (used on expand/collapse to avoid rebuilding the tree mid-interaction). */
+    void saveQuickCommands(bool publishToOtherPages = true) const;
+    void reloadQuickCommandsList();
+    void rebuildQuickCommandsList();
+    void rebuildQuickCommandsTree();
+    void quickCommandsJsonToItem(const QJsonObject &object);
+    QJsonObject quickCommandsFolderCardToJson(FluentQt::ExpandSettingCard *card) const;
+    QJsonObject quickCommandsCommandRowToJson(QWidget *rowWidget) const;
+    void syncQuickCommandsDataFromList();
+    void syncQuickCommandsDataFromTree() { syncQuickCommandsDataFromList(); }
+    void applyQuickCommandRowPreview(QWidget *rowWidget);
+    void refreshQuickCommandRowPreview(QWidget *rowWidget);
+    void updateQuickCommandsActionState();
+    int quickCommandsCountCommands() const;
+    QStringList collectTemplateParamValues(QWidget *rowWidget) const;
+    void sendQuickCommandRow(QWidget *rowWidget);
+    QVBoxLayout *quickCommandsTargetLayoutForAdd();
+    FluentQt::ExpandSettingCard *quickCommandsParentFolderFromLayout(QVBoxLayout *lay) const;
+    void quickCommandsHandleListClick(QWidget *widget);
+    void reinstallQuickCommandsClickFilters();
+    void updateQuickCommandsSelectionHighlight();
+    void moveQuickCommandsBlock(QWidget *block, int delta);
+    void wireQuickCommandsFolderReorderButtons(FluentQt::ExpandSettingCard *folderCard);
+    FluentQt::SimpleCardWidget *insertQuickCommandRow(QVBoxLayout *targetLay, int index, const QVariantMap &map,
+                                                     bool isTemplate);
+    void addQuickCommandsFolder();
+    void addQuickCommandsFixedCommand();
+    void addQuickCommandsTemplateCommand();
+    void deleteQuickCommandsSelection();
+    void editQuickCommandsSelection();
+    void importQuickCommands();
+    void exportQuickCommands();
+
     void showInfo(const QString &title, const QString &message);
     void showSuccess(const QString &title, const QString &message);
     void showWarning(const QString &title, const QString &message);
@@ -384,7 +435,8 @@ class WorkbenchPage : public AppPage, public AppControl::SessionControl
         SendPackets,
         MacroSteps,
         AutoReplyRules,
-        ProtocolTemplates
+        ProtocolTemplates,
+        QuickCommands
     };
     // All sessions persist these lists under the same settings keys. Each save
     // reloads the other sessions so none of them writes back a stale copy.
@@ -495,6 +547,21 @@ class WorkbenchPage : public AppPage, public AppControl::SessionControl
 
     FluentQt::ScrollArea *m_sideScroll = nullptr;
     QWidget *m_sidePanel = nullptr;
+    QSplitter *m_mainWorkbenchSplitter = nullptr;
+    QSplitter *m_terminalSendSplitter = nullptr;
+    QWidget *m_terminalSectionWidget = nullptr;
+    QWidget *m_sendSectionWidget = nullptr;
+    double m_terminalSendTopRatio = 0.65;
+    bool m_terminalSendSplitterSizesPending = true;
+    QWidget *m_quickCommandsPanelWidget = nullptr;
+    FluentQt::ScrollArea *m_quickCommandsScroll = nullptr;
+    QWidget *m_quickCommandsListHost = nullptr;
+    QVBoxLayout *m_quickCommandsListLayout = nullptr;
+    QObject *m_quickCommandsSelectedContext = nullptr;
+    FluentQt::TransparentToolButton *m_quickCommandsToggleButton = nullptr;
+    QJsonArray m_quickCommandsData;
+    bool m_quickCommandsPanelVisible = false;
+    int m_quickCommandsPanelWidth = 300;
     FluentQt::ComboBox *m_portCombo = nullptr;
     FluentQt::EditableComboBox *m_baudCombo = nullptr;
     FluentQt::ComboBox *m_dataBitsCombo = nullptr;
@@ -564,7 +631,10 @@ class WorkbenchPage : public AppPage, public AppControl::SessionControl
     FluentQt::PrimaryPushButton *m_connectButton = nullptr;
     FluentQt::PrimaryPushButton *m_sendButton = nullptr;
     FluentQt::TransparentToolButton *m_receiveModeButton = nullptr;
-    FluentQt::PushButton *m_sendModeButton = nullptr;
+    FluentQt::TransparentToolButton *m_sendModeButton = nullptr;
+    FluentQt::CheckBox *m_sendSuffixCrCheck = nullptr;
+    FluentQt::CheckBox *m_sendSuffixLfCheck = nullptr;
+    FluentQt::CheckBox *m_sendQuickTimestampCheck = nullptr;
     FluentQt::PrimaryPushButton *m_packetSendButton = nullptr;
     FluentQt::PrimaryPushButton *m_macroRunButton = nullptr;
     FluentQt::PrimaryPushButton *m_scriptRunButton = nullptr;

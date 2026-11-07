@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(
     FluentSerialAssistant
-    VERSION 0.1.26
+    VERSION 0.1.28
     DESCRIPTION "A Fluent Qt serial assistant prototype"
     LANGUAGES CXX
 )
@@ -98,6 +98,8 @@ add_executable(FluentSerialAssistant
     src/app/core/modbus_utils.h
     src/app/core/protocol_template.cpp
     src/app/core/protocol_template.h
+    src/app/core/quick_commands.cpp
+    src/app/core/quick_commands.h
     src/app/core/script_runner.cpp
     src/app/core/script_runner.h
     src/app/core/text_encoding.cpp
@@ -151,11 +153,13 @@ add_executable(FluentSerialAssistant
     src/app/view/workbench/workbench_page_files.cpp
     src/app/view/workbench/workbench_page_internal.h
     src/app/view/workbench/workbench_page_layout.cpp
+    src/app/view/workbench/workbench_page_splitter.cpp
     src/app/view/workbench/workbench_page_macros.cpp
     src/app/view/workbench/workbench_page_modbus.cpp
     src/app/view/workbench/workbench_page_packets.cpp
     src/app/view/workbench/workbench_page_plot.cpp
     src/app/view/workbench/workbench_page_protocol_templates.cpp
+    src/app/view/workbench/workbench_page_quick_commands.cpp
     src/app/view/workbench/workbench_page_scripts.cpp
     src/app/view/workbench/workbench_page_side_sections.cpp
     src/app/view/workbench/workbench_page_state.cpp
@@ -221,11 +225,16 @@ if(BUILD_TESTING)
     target_link_libraries(FluentSerialTestSupport PUBLIC ${workbench_test_libraries})
     foreach(test_name IN ITEMS data_table_model frame_codecs plot_value_parser control_service workbench_data_table workbench_quick_plot workbench_reliability protocol_windows terminal_view terminal_colors
                                auto_reply virtual_serial_pair virtual_serial_workbench update_downloader update_installer
-                               update_ui update_manager main_window)
+                               update_ui update_manager main_window quick_commands)
         add_executable(tst_${test_name} tests/tst_${test_name}.cpp)
         target_link_libraries(tst_${test_name} PRIVATE FluentSerialTestSupport Qt6::Test)
         add_test(NAME ${test_name} COMMAND tst_${test_name})
-        set_tests_properties(${test_name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
+        # Default CTest uses offscreen; windeployqt for this repo only ships platforms/minimal + windows.
+        if(WIN32)
+            set_tests_properties(${test_name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=minimal" TIMEOUT 120)
+        else()
+            set_tests_properties(${test_name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 120)
+        endif()
     endforeach()
 endif()
 

@@ -135,12 +135,15 @@ QWidget *WorkbenchPage::createTerminalSection()
     AppUi::setFluentToolTip(themeButton, AppI18n::text("切换主题"));
     auto *languageButton = new TransparentToolButton(icon(FluentIcon::Language), section);
     AppUi::setFluentToolTip(languageButton, AppI18n::text("切换语言"));
-    m_receiveModeButton = new TransparentToolButton(icon(FluentIcon::Font), section);
-    AppUi::installFluentToolTip(m_receiveModeButton);
     auto *settingsButton = new TransparentToolButton(icon(FluentIcon::Setting), section);
     AppUi::setFluentToolTip(settingsButton, AppI18n::text("设置"));
+    m_quickCommandsToggleButton = new TransparentToolButton(icon(FluentIcon::CommandPrompt), section);
+    AppUi::setFluentToolTip(m_quickCommandsToggleButton, AppI18n::text("常用命令"));
+    m_quickCommandsToggleButton->setCheckable(true);
+    connect(m_quickCommandsToggleButton, &TransparentToolButton::toggled, this,
+            &WorkbenchPage::toggleQuickCommandsPanel);
     for (ToolButton *button : {clearButton, searchButton, plotButton, dataTableButton, themeButton, languageButton,
-                               m_receiveModeButton, settingsButton}) {
+                               settingsButton, m_quickCommandsToggleButton}) {
         button->setProperty("terminalHeaderAction", true);
         button->setFixedSize(CompactControlHeight, CompactControlHeight);
         button->setIconSize(QSize(16, 16));
@@ -149,8 +152,8 @@ QWidget *WorkbenchPage::createTerminalSection()
                            "min-height: 32px; max-height: 32px; padding: 0px; }");
         FluentStyleSheet::setCustomStyleSheet(button, buttonStyle, buttonStyle);
     }
-    for (ToolButton *button : {searchButton, plotButton, dataTableButton, themeButton, languageButton,
-                               m_receiveModeButton, settingsButton}) {
+    for (ToolButton *button : {searchButton, plotButton, dataTableButton, themeButton, languageButton, settingsButton,
+                               m_quickCommandsToggleButton}) {
         actionLayout->addWidget(button);
     }
 
@@ -160,7 +163,7 @@ QWidget *WorkbenchPage::createTerminalSection()
     m_terminalView->setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
     m_terminalView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_terminalView->document()->setMaximumBlockCount(maxRecordCount());
-    m_terminalView->setMinimumHeight(420);
+    m_terminalView->setMinimumHeight(TerminalViewMinHeight);
     applyTerminalFont();
     root->addWidget(m_terminalView, 1);
 
@@ -304,11 +307,6 @@ QWidget *WorkbenchPage::createTerminalSection()
     });
     connect(languageButton, &TransparentToolButton::clicked, this,
             []() { AppI18n::applyLocale(AppI18n::toggledChineseEnglishLocaleName()); });
-    connect(m_receiveModeButton, &TransparentToolButton::clicked, this, [this]() {
-        if (m_displayModeSegment) {
-            m_displayModeSegment->setCurrentItem(nextReceiveDisplayMode(isReceiveHexMode(currentDisplayMode())));
-        }
-    });
     connect(settingsButton, &TransparentToolButton::clicked, this, &WorkbenchPage::settingsRequested);
     connect(m_terminalSearchEdit, &LineEdit::textChanged, this, [this]() {
         resetTerminalSearchNavigation();
@@ -440,55 +438,156 @@ void WorkbenchPage::hideTerminalSearchBar()
 
 void WorkbenchPage::updateReceiveModeButton()
 {
-    if (!m_receiveModeButton) {
+    if (m_receiveModeButton) {
+        const bool hexMode = isReceiveHexMode(currentDisplayMode());
+        const QString currentLabel = shortcutReceiveDisplayModeLabel(hexMode);
+        const QString nextLabel = shortcutReceiveDisplayModeLabel(!hexMode);
+        m_receiveModeButton->setIcon(icon(hexMode ? FluentIcon::Code : FluentIcon::Font));
+        m_receiveModeButton->setToolTip(
+            AppI18n::text("当前接收显示为 %1，点击切换为 %2").arg(currentLabel, nextLabel));
+    }
+    if (m_sendQuickTimestampCheck && m_timestampCheck) {
+        const QSignalBlocker b(m_sendQuickTimestampCheck);
+        m_sendQuickTimestampCheck->setChecked(m_timestampCheck->isChecked());
+    }
+}
+
+void WorkbenchPage::updateSendQuickSuffixChecks()
+{
+    if (!m_sendSuffixCrCheck || !m_sendSuffixLfCheck || !m_lineEndingCombo) {
         return;
     }
+    const QString key = m_lineEndingCombo->currentData().toString();
+    const QSignalBlocker bc(m_sendSuffixCrCheck);
+    const QSignalBlocker bl(m_sendSuffixLfCheck);
+    m_sendSuffixCrCheck->setChecked(key == QStringLiteral("cr") || key == QStringLiteral("crlf"));
+    m_sendSuffixLfCheck->setChecked(key == QStringLiteral("lf") || key == QStringLiteral("crlf"));
+}
 
-    const bool hexMode = isReceiveHexMode(currentDisplayMode());
-    const QString currentLabel = shortcutReceiveDisplayModeLabel(hexMode);
-    const QString nextLabel = shortcutReceiveDisplayModeLabel(!hexMode);
-    m_receiveModeButton->setIcon(icon(hexMode ? FluentIcon::Code : FluentIcon::Font));
-    m_receiveModeButton->setToolTip(AppI18n::text("当前接收显示为 %1，点击切换为 %2").arg(currentLabel, nextLabel));
+void WorkbenchPage::syncSendQuickSuffixChecksFromLineEndingCombo()
+{
+    if (!m_sendSuffixCrCheck || !m_sendSuffixLfCheck || !m_lineEndingCombo) {
+        return;
+    }
+    const bool cr = m_sendSuffixCrCheck->isChecked();
+    const bool lf = m_sendSuffixLfCheck->isChecked();
+    QString key = QStringLiteral("none");
+    if (cr && lf) {
+        key = QStringLiteral("crlf");
+    } else if (cr) {
+        key = QStringLiteral("cr");
+    } else if (lf) {
+        key = QStringLiteral("lf");
+    }
+    const int idx = m_lineEndingCombo->findData(key);
+    if (idx >= 0) {
+        const QSignalBlocker b(m_lineEndingCombo);
+        m_lineEndingCombo->setCurrentIndex(idx);
+        AppSettings settings;
+        settings.setValue(QStringLiteral("send/lineEnding"), key);
+    }
+    updateSendQuickSuffixChecks();
 }
 
 QWidget *WorkbenchPage::createSendSection()
 {
     auto *section = new HeaderCardWidget(this);
     hideCardHeader(section);
+    section->setMinimumHeight(SendSectionMinHeight);
     auto *root = cardBody(section, 10);
 
-    auto *sendRow = new QHBoxLayout;
-    sendRow->setSpacing(10);
     m_sendEdit = new PlainTextEdit(section);
     m_sendEdit->setLineWrapMode(QPlainTextEdit::WidgetWidth);
     m_sendEdit->setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
-    m_sendEdit->setMinimumHeight(112);
+    m_sendEdit->setMinimumHeight(72);
     m_sendEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     m_sendEdit->installEventFilter(this);
-    sendRow->addWidget(m_sendEdit, 1);
+    root->addWidget(m_sendEdit);
 
-    m_sendModeButton = new PushButton(section);
-    setFixedControlWidth(m_sendModeButton, 72);
-    m_sendModeButton->setMinimumHeight(112);
-    m_sendModeButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
-    sendRow->addWidget(m_sendModeButton);
+    auto *quickRow = new QHBoxLayout;
+    quickRow->setSpacing(8);
+    auto *receiveLabel = new CaptionLabel(AppI18n::text("接收"), section);
+    receiveLabel->setFixedHeight(CompactControlHeight);
+    receiveLabel->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
+    quickRow->addWidget(receiveLabel, 0, Qt::AlignVCenter);
 
-    m_sendButton = new PrimaryPushButton(icon(FluentIcon::Send), QString(), section);
-    AppUi::setFluentToolTip(m_sendButton, AppI18n::text("发送"), ToolTipPosition::Left);
-    m_sendButton->setIconSize(QSize(40, 40));
-    setFixedControlWidth(m_sendButton, 112);
-    m_sendButton->setMinimumHeight(112);
-    sendRow->addWidget(m_sendButton);
+    m_receiveModeButton = new TransparentToolButton(icon(FluentIcon::Font), section);
+    AppUi::installFluentToolTip(m_receiveModeButton);
+    m_receiveModeButton->setProperty("terminalHeaderAction", true);
+    m_receiveModeButton->setFixedSize(CompactControlHeight, CompactControlHeight);
+    m_receiveModeButton->setIconSize(QSize(16, 16));
+    {
+        const QString buttonStyle =
+            QStringLiteral("QToolButton[terminalHeaderAction=\"true\"] { min-width: 32px; max-width: 32px; "
+                           "min-height: 32px; max-height: 32px; padding: 0px; }");
+        FluentStyleSheet::setCustomStyleSheet(m_receiveModeButton, buttonStyle, buttonStyle);
+    }
+    quickRow->addWidget(m_receiveModeButton, 0, Qt::AlignVCenter);
 
-    root->addLayout(sendRow);
+    auto *sendLabel = new CaptionLabel(AppI18n::text("发送"), section);
+    sendLabel->setFixedHeight(CompactControlHeight);
+    sendLabel->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
+    quickRow->addWidget(sendLabel, 0, Qt::AlignVCenter);
 
-    connect(m_sendModeButton, &PushButton::clicked, this, [this]() {
+    m_sendModeButton = new TransparentToolButton(section);
+    makeToolbarSquareButton(m_sendModeButton);
+    AppUi::setFluentToolTip(m_sendModeButton, AppI18n::text("切换发送模式（文本 / HEX）"), ToolTipPosition::Top);
+    quickRow->addWidget(m_sendModeButton, 0, Qt::AlignVCenter);
+
+    auto *suffixLabel = new CaptionLabel(AppI18n::text("后缀"), section);
+    suffixLabel->setFixedHeight(CompactControlHeight);
+    suffixLabel->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
+    quickRow->addWidget(suffixLabel, 0, Qt::AlignVCenter);
+
+    m_sendSuffixCrCheck = new CheckBox(QStringLiteral("CR"), section);
+    m_sendSuffixLfCheck = new CheckBox(QStringLiteral("LF"), section);
+    for (CheckBox *c : {m_sendSuffixCrCheck, m_sendSuffixLfCheck}) {
+        c->setFixedHeight(CompactControlHeight);
+    }
+    quickRow->addWidget(m_sendSuffixCrCheck, 0, Qt::AlignVCenter);
+    quickRow->addWidget(m_sendSuffixLfCheck, 0, Qt::AlignVCenter);
+
+    quickRow->addStretch(1);
+
+    m_sendQuickTimestampCheck = new CheckBox(AppI18n::text("时间戳"), section);
+    m_sendQuickTimestampCheck->setFixedHeight(CompactControlHeight);
+    quickRow->addWidget(m_sendQuickTimestampCheck, 0, Qt::AlignVCenter);
+
+    m_sendButton = new PrimaryPushButton(icon(FluentIcon::Send), AppI18n::text("发送"), section);
+    AppUi::setFluentToolTip(m_sendButton, AppI18n::text("发送"), ToolTipPosition::Top);
+    m_sendButton->setIconSize(QSize(18, 18));
+    m_sendButton->setFixedHeight(CompactControlHeight);
+    m_sendButton->setMinimumWidth(88);
+    m_sendButton->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
+    quickRow->addWidget(m_sendButton, 0, Qt::AlignVCenter);
+
+    root->addLayout(quickRow);
+
+    connect(m_receiveModeButton, &TransparentToolButton::clicked, this, [this]() {
+        if (m_displayModeSegment) {
+            m_displayModeSegment->setCurrentItem(nextReceiveDisplayMode(isReceiveHexMode(currentDisplayMode())));
+        }
+    });
+    connect(m_sendModeButton, &TransparentToolButton::clicked, this, [this]() {
         if (m_hexSendCheck) {
             m_hexSendCheck->setChecked(!m_hexSendCheck->isChecked());
         }
     });
+    connect(m_sendSuffixCrCheck, &CheckBox::toggled, this, [this](bool) { syncSendQuickSuffixChecksFromLineEndingCombo(); });
+    connect(m_sendSuffixLfCheck, &CheckBox::toggled, this, [this](bool) { syncSendQuickSuffixChecksFromLineEndingCombo(); });
+    connect(m_sendQuickTimestampCheck, &CheckBox::toggled, this, [this](bool checked) {
+        if (!m_timestampCheck) {
+            return;
+        }
+        const QSignalBlocker b(m_timestampCheck);
+        m_timestampCheck->setChecked(checked);
+        AppSettings settings;
+        settings.setValue(QStringLiteral("receive/timestamp"), checked);
+        renderTerminal();
+    });
     connect(m_sendButton, &PrimaryPushButton::clicked, this, &WorkbenchPage::sendCurrentPayload);
     updateSendModeButton();
+    updateReceiveModeButton();
 
     return section;
 }
@@ -500,7 +599,11 @@ void WorkbenchPage::updateSendModeButton()
     }
 
     const bool hexMode = m_hexSendCheck && m_hexSendCheck->isChecked();
-    m_sendModeButton->setText(hexMode ? QStringLiteral("HEX") : AppI18n::text("文本"));
+    const QString currentLabel = hexMode ? QStringLiteral("HEX") : AppI18n::text("文本");
+    const QString nextLabel = hexMode ? AppI18n::text("文本") : QStringLiteral("HEX");
+    m_sendModeButton->setIcon(icon(hexMode ? FluentIcon::Code : FluentIcon::Font));
+    m_sendModeButton->setToolTip(
+        AppI18n::text("当前发送为 %1，点击切换为 %2").arg(currentLabel, nextLabel));
     m_sendModeButton->setAccessibleDescription(hexMode ? AppI18n::text("当前为 HEX 发送，点击切换为文本")
                                                        : AppI18n::text("当前为文本发送，点击切换为 HEX"));
 }

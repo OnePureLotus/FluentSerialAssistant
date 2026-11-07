@@ -211,7 +211,7 @@ void WorkbenchPage::restoreSettings()
     m_autoOpenCheck->setChecked(settings.value(QStringLiteral("serial/autoOpen"), false).toBool());
     m_saveReceiveCheck->setChecked(settings.value(QStringLiteral("receive/saveToFile"), false).toBool());
     m_autoScrollCheck->setChecked(settings.value(QStringLiteral("receive/autoScroll"), true).toBool());
-    m_timestampCheck->setChecked(settings.value(QStringLiteral("receive/timestamp"), false).toBool());
+    m_timestampCheck->setChecked(settings.value(QStringLiteral("receive/timestamp"), true).toBool());
     const int frameModeIndex = m_frameModeCombo->findData(frameMode);
     m_frameModeCombo->setCurrentIndex(frameModeIndex >= 0 ? frameModeIndex
                                                           : m_frameModeCombo->findData(QStringLiteral("timeout")));
@@ -273,6 +273,12 @@ void WorkbenchPage::restoreSettings()
     }
     m_terminalView->document()->setMaximumBlockCount(maxRecordCount());
     applyTerminalFont();
+    m_terminalSendTopRatio = settings.value(QStringLiteral("workbench/terminalSendTopRatio"), 0.65).toDouble();
+    m_terminalSendTopRatio = qBound(0.12, m_terminalSendTopRatio, 0.92);
+    m_terminalSendSplitterSizesPending = true;
+    updateReceiveModeButton();
+    updateSendQuickSuffixChecks();
+    updateSendModeButton();
 }
 
 void WorkbenchPage::saveSettings() const
@@ -300,6 +306,7 @@ void WorkbenchPage::saveSettings() const
     settings.setValue(QStringLiteral("log/format"), autoLogFormatKey());
     settings.setValue(QStringLiteral("log/maxFileSizeMb"), numberEditValue(m_autoLogMaxSizeEdit, 16, 1, 4096));
     settings.setValue(QStringLiteral("terminal/displayMode"), currentDisplayMode());
+    settings.setValue(QStringLiteral("workbench/terminalSendTopRatio"), m_terminalSendTopRatio);
     settings.setValue(QStringLiteral("send/mode"),
                       m_hexSendCheck->isChecked() ? QStringLiteral("hex") : QStringLiteral("text"));
     settings.setValue(QStringLiteral("send/encoding"), sendEncodingKey());
@@ -341,6 +348,7 @@ void WorkbenchPage::saveSettings() const
                       numberEditValue(m_fileIntervalEdit, DefaultFileChunkIntervalMs, 0, 60000));
     saveSendHistory();
     saveSendPackets();
+    saveQuickCommands();
     saveMacroSteps();
     saveAutoReplyRules();
 }
@@ -455,6 +463,18 @@ void WorkbenchPage::copySessionConfigFrom(const WorkbenchPage &source)
     m_packetEnabledCheck->setChecked(source.m_packetEnabledCheck->isChecked());
     updatePacketTable();
 
+    m_quickCommandsData = source.m_quickCommandsData;
+    m_quickCommandsPanelVisible = source.m_quickCommandsPanelVisible;
+    m_quickCommandsPanelWidth = source.m_quickCommandsPanelWidth;
+    m_terminalSendTopRatio = source.m_terminalSendTopRatio;
+    m_terminalSendSplitterSizesPending = true;
+    rebuildQuickCommandsTree();
+    toggleQuickCommandsPanel(m_quickCommandsPanelVisible);
+    if (m_quickCommandsToggleButton && source.m_quickCommandsToggleButton) {
+        const QSignalBlocker b(m_quickCommandsToggleButton);
+        m_quickCommandsToggleButton->setChecked(source.m_quickCommandsToggleButton->isChecked());
+    }
+
     const int modbusFunctionIndex = m_modbusFunctionCombo->findData(source.m_modbusFunctionCombo->currentData());
     if (modbusFunctionIndex >= 0) {
         m_modbusFunctionCombo->setCurrentIndex(modbusFunctionIndex);
@@ -550,6 +570,9 @@ void WorkbenchPage::copySessionConfigFrom(const WorkbenchPage &source)
     refreshDataTableWindow();
     updateCounters();
     updateRateStats();
+    updateReceiveModeButton();
+    updateSendQuickSuffixChecks();
+    updateSendModeButton();
 }
 
 void WorkbenchPage::setTerminalFontFamily(const QString &family) { applyTerminalFont(family); }

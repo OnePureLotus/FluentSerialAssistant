@@ -36,6 +36,13 @@ int main(int argc, char *argv[])
         const QString legacyPath = QDir(legacyConfigDir).filePath(fileName);
         if (!QFile::exists(targetPath) && QFile::exists(legacyPath)) {
             QFile::copy(legacyPath, targetPath);
+            if (fileName == QStringLiteral("FluentSerialAssistant.ini")) {
+                // Portable / dev trees often ship an .ini next to the exe; never treat
+                // saved "常用命令" as part of that snapshot — users should start empty.
+                QSettings migrated(targetPath, QSettings::IniFormat);
+                migrated.remove(QStringLiteral("send/quickCommands"));
+                migrated.sync();
+            }
         }
     };
     migrateLegacyConfig(QStringLiteral("FluentSerialAssistant.ini"));

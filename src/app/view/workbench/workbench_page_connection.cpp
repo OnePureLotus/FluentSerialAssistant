@@ -92,6 +92,7 @@ void WorkbenchPage::setControlsEnabledForConnection(bool connected)
     m_loopCheck->setEnabled(connected);
     m_loopIntervalEdit->setEnabled(connected && m_loopCheck->isChecked());
     updatePacketActionState();
+    updateQuickCommandsActionState();
     if (m_fileSendButton) {
         m_fileSendButton->setEnabled(connected && !m_fileSendFile.isOpen());
     }

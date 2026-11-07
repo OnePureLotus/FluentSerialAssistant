@@ -6,6 +6,8 @@
 #include <QtCore/QPointer>
 #include <QtCore/QThread>
 #include <QtGui/QHideEvent>
+#include <QtGui/QShowEvent>
+#include <QtGui/QMouseEvent>
 
 using namespace FluentQt;
 using namespace WorkbenchPagePrivate;
@@ -54,7 +56,12 @@ WorkbenchPage::WorkbenchPage(QWidget *parent, bool restoreSavedSession, bool all
     connect(&m_macroTimer, &QTimer::timeout, this, &WorkbenchPage::handleMacroTimer);
     m_rxFrameIdleTimer.setSingleShot(true);
     connect(&m_rxFrameIdleTimer, &QTimer::timeout, this, &WorkbenchPage::flushRxFrameBuffer);
-    connect(ThemeManager::instance(), &ThemeManager::effectiveThemeChanged, this, [this]() { renderTerminal(); });
+    connect(ThemeManager::instance(), &ThemeManager::effectiveThemeChanged, this, [this]() {
+        renderTerminal();
+        if (m_quickCommandsListHost) {
+            updateQuickCommandsSelectionHighlight();
+        }
+    });
     connect(FluentConfig::instance(), &FluentConfig::localeNameChanged, this, [this]() {
         updateConnectionUi(m_serial.isOpen());
         updateCounters();
@@ -73,6 +80,10 @@ WorkbenchPage::WorkbenchPage(QWidget *parent, bool restoreSavedSession, bool all
         updateFileSendUi(m_fileSendFile.isOpen());
         updateFileProgress();
         renderTerminal();
+        if (m_quickCommandsScroll) {
+            syncQuickCommandsDataFromTree();
+            rebuildQuickCommandsTree();
+        }
     });
 
     refreshPorts();
@@ -80,6 +91,7 @@ WorkbenchPage::WorkbenchPage(QWidget *parent, bool restoreSavedSession, bool all
     // would erase them the next time it saves its settings.
     loadSendHistory();
     loadSendPackets();
+    loadQuickCommands();
     loadMacroSteps();
     loadProtocolTemplates();
     loadAutoReplyRules();
@@ -94,6 +106,7 @@ WorkbenchPage::WorkbenchPage(QWidget *parent, bool restoreSavedSession, bool all
         updatePacketActionState();
         updateMacroActionState();
         updateAutoReplyActionState();
+        updateQuickCommandsActionState();
         updateFileSendUi(false);
         updateFileProgress();
         updateAutoLogStatus();
@@ -233,6 +246,21 @@ void WorkbenchPage::reloadSharedList(SharedList list)
     case SharedList::ProtocolTemplates:
         loadProtocolTemplates(false);
         break;
+    case SharedList::QuickCommands:
+        reloadQuickCommandsList();
+        break;
+    }
+}
+
+void WorkbenchPage::showEvent(QShowEvent *event)
+{
+    AppPage::showEvent(event);
+    if (m_terminalSendSplitter && m_terminalSendSplitterSizesPending) {
+        applyTerminalSendSplitterSizes();
+        const QList<int> sz = m_terminalSendSplitter->sizes();
+        if (sz.size() >= 2 && (sz.at(0) + sz.at(1)) > 0) {
+            m_terminalSendSplitterSizesPending = false;
+        }
     }
 }
 
@@ -240,6 +268,10 @@ void WorkbenchPage::hideEvent(QHideEvent *event)
 {
     if (m_terminalSearchBar) {
         m_terminalSearchBar->hide();
+    }
+    if (m_quickCommandsScroll) {
+        syncQuickCommandsDataFromTree();
+        saveQuickCommands();
     }
     AppPage::hideEvent(event);
 }
@@ -287,6 +319,20 @@ bool WorkbenchPage::eventFilter(QObject *watched, QEvent *event)
         }
     }
 
+    if (m_quickCommandsScroll && m_quickCommandsScroll->viewport() == watched && event->type() == QEvent::MouseButtonPress) {
+        auto *me = static_cast<QMouseEvent *>(event);
+        if (me->button() == Qt::LeftButton) {
+            QWidget *vp = m_quickCommandsScroll->viewport();
+            QWidget *child = vp->childAt(me->pos());
+            if (!child) {
+                child = qobject_cast<QWidget *>(m_quickCommandsScroll->widget());
+            }
+            if (child) {
+                quickCommandsHandleListClick(child);
+            }
+        }
+    }
+
     if (watched == m_sendEdit && event->type() == QEvent::KeyPress) {
         auto *keyEvent = static_cast<QKeyEvent *>(event);
         const bool enterKey = keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter;
@@ -300,19 +346,33 @@ bool WorkbenchPage::eventFilter(QObject *watched, QEvent *event)
 
 bool WorkbenchPage::forwardSidePanelWheelEvent(QObject *watched, QWheelEvent *event)
 {
-    if (!m_sideScroll || !m_sidePanel || !event) {
+    if (!event) {
         return false;
     }
 
     auto *widget = qobject_cast<QWidget *>(watched);
-    if (!widget || (widget != m_sidePanel && !m_sidePanel->isAncestorOf(widget))) {
-        return false;
-    }
-    if (widget == m_sideScroll->viewport()) {
+    if (!widget) {
         return false;
     }
 
-    auto *viewport = m_sideScroll->viewport();
+    ScrollArea *panelScroll = nullptr;
+    QWidget *panelRoot = nullptr;
+    if (m_sideScroll && m_sidePanel && (widget == m_sidePanel || m_sidePanel->isAncestorOf(widget))) {
+        panelScroll = m_sideScroll;
+        panelRoot = m_sidePanel;
+    } else if (m_quickCommandsScroll && m_quickCommandsListHost &&
+               (widget == m_quickCommandsPanelWidget || m_quickCommandsPanelWidget->isAncestorOf(widget))) {
+        panelScroll = m_quickCommandsScroll;
+        panelRoot = m_quickCommandsListHost;
+    }
+    if (!panelScroll || !panelRoot) {
+        return false;
+    }
+    if (widget == panelScroll->viewport()) {
+        return false;
+    }
+
+    auto *viewport = panelScroll->viewport();
     if (!viewport) {
         return false;
     }
@@ -321,7 +381,7 @@ bool WorkbenchPage::forwardSidePanelWheelEvent(QObject *watched, QWheelEvent *ev
     // end, then the panel takes the wheel. Cards are scroll areas only for
     // their expand animation.
     const int delta = event->angleDelta().y() != 0 ? event->angleDelta().y() : event->pixelDelta().y();
-    for (QWidget *ancestor = widget; delta != 0 && ancestor != m_sidePanel; ancestor = ancestor->parentWidget()) {
+    for (QWidget *ancestor = widget; delta != 0 && ancestor != panelRoot; ancestor = ancestor->parentWidget()) {
         const auto *area = qobject_cast<QAbstractScrollArea *>(ancestor);
         const QScrollBar *scrollBar =
             area && !qobject_cast<const ExpandSettingCard *>(area) ? area->verticalScrollBar() : nullptr;

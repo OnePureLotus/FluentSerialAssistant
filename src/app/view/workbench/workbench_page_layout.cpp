@@ -42,12 +42,38 @@ QWidget *WorkbenchPage::createWorkbench()
     auto *terminalPanel = new QWidget(workbench);
     auto *terminalLayout = new QVBoxLayout(terminalPanel);
     terminalLayout->setContentsMargins(0, 0, 0, 0);
-    terminalLayout->setSpacing(10);
-    terminalLayout->addWidget(createTerminalSection(), 1);
-    terminalLayout->addWidget(createSendSection());
+    terminalLayout->setSpacing(0);
+
+    m_terminalSendSplitter = new QSplitter(Qt::Vertical, terminalPanel);
+    m_terminalSendSplitter->setChildrenCollapsible(false);
+    m_terminalSendSplitter->setHandleWidth(6);
+    m_terminalSectionWidget = createTerminalSection();
+    m_sendSectionWidget = createSendSection();
+    m_terminalSendSplitter->addWidget(m_terminalSectionWidget);
+    m_terminalSendSplitter->addWidget(m_sendSectionWidget);
+    m_terminalSendSplitter->setStretchFactor(0, 1);
+    m_terminalSendSplitter->setStretchFactor(1, 0);
+    connect(m_terminalSendSplitter, &QSplitter::splitterMoved, this,
+            [this](int pos, int index) {
+                (void)pos;
+                (void)index;
+                QList<int> sizes = m_terminalSendSplitter->sizes();
+                if (sizes.size() >= 2) {
+                    const int sum = sizes.at(0) + sizes.at(1);
+                    if (sum > 0) {
+                        m_terminalSendTopRatio = static_cast<double>(sizes.at(0)) / static_cast<double>(sum);
+                    }
+                }
+            });
+
+    terminalLayout->addWidget(m_terminalSendSplitter, 1);
+
+    auto *splitter = new QSplitter(Qt::Horizontal, workbench);
+    splitter->setChildrenCollapsible(false);
+    setupQuickCommandsPanel(terminalPanel, splitter);
 
     root->addWidget(m_sideScroll);
-    root->addWidget(terminalPanel, 1);
+    root->addWidget(splitter, 1);
     return workbench;
 }
 

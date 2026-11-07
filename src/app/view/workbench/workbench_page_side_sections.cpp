@@ -242,6 +242,7 @@ QWidget *WorkbenchPage::createReceiveSettingsSection()
     connect(m_timestampCheck, &CheckBox::toggled, this, [this](bool checked) {
         AppSettings settings;
         settings.setValue(QStringLiteral("receive/timestamp"), checked);
+        updateReceiveModeButton();
         renderTerminal();
     });
     connect(m_pauseCheck, &CheckBox::toggled, this, [this](bool checked) {
@@ -622,6 +623,10 @@ QWidget *WorkbenchPage::createSendSettingsSection()
     m_loopIntervalEdit = createNumberEdit(section, 1000, 10, 600000);
     m_loopIntervalEdit->setEnabled(false);
     addFormRow(root, AppI18n::text("间隔"), m_loopIntervalEdit, unitLabel(QStringLiteral("ms"), section));
+
+    connect(m_lineEndingCombo, QOverload<int>::of(&ComboBox::currentIndexChanged), this, [this](int) {
+        updateSendQuickSuffixChecks();
+    });
 
     connect(m_historyCombo, &ComboBox::currentIndexChanged, this, &WorkbenchPage::applyHistoryItem);
     connect(m_sendEncodingCombo, &ComboBox::currentIndexChanged, this, [this](int) {
