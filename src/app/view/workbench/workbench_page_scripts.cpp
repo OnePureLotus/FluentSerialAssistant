@@ -386,7 +386,7 @@ bool WorkbenchPage::sendScriptPayload(const QString &payloadText, const QString 
     historyItem.payload = payloadText;
     historyItem.lineEnding = normalizedScriptLineEnding(lineEndingKey);
     addSendHistory(historyItem);
-    appendRecord(RecordDirection::Tx, output, true, AppI18n::text("脚本"));
+    appendRecord(RecordDirection::Tx, output, true, AppI18n::text("脚本"), false, mode == QStringLiteral("hex"));
     appendScriptLog(AppI18n::text("脚本发送 %1").arg(formatBytes(output.size())));
     return true;
 }

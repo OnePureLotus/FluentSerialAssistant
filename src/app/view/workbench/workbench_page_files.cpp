@@ -442,7 +442,7 @@ void WorkbenchPage::sendNextFileChunk()
     }
 
     m_fileSendSent += data.size();
-    appendRecord(RecordDirection::Tx, data);
+    appendRecord(RecordDirection::Tx, data, true, QString(), false, true);
     updateFileProgress();
 
     m_fileSendTimer.start(m_fileSendFile.atEnd()

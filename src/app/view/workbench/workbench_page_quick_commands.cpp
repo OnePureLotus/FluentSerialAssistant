@@ -18,6 +18,7 @@
 #include <QtCore/QEvent>
 #include <QtCore/QObject>
 #include <QtCore/QPair>
+#include <QtCore/QSignalBlocker>
 #include <QtCore/QTimer>
 #include <QtWidgets/QAbstractButton>
 #include <QtWidgets/QDialog>
@@ -55,6 +56,11 @@ static const char PropCommandCard[] = "qcCommandCard";
 static const char PropCommandData[] = "qcCommandData";
 static const char PropSendBtn[] = "qcSendBtn";
 static const char PropCommandRowOuter[] = "qcCommandRowOuter";
+
+/** 与命令卡 `cardLayout` 上 + `inner` 顶边距之和一致，用于右侧发送钮与标题行对齐。 */
+constexpr int kQcCommandCardTopInset = 4;
+constexpr int kQcCommandInnerTopMargin = 8;
+constexpr int kQcCommandTitleChromeHeight = kQcCommandCardTopInset + kQcCommandInnerTopMargin + CompactControlHeight;
 
 namespace {
 
@@ -144,6 +150,16 @@ class QuickCmdChevronButton : public QToolButton
     int m_box = 30;
     bool m_hover = false;
     bool m_pressed = false;
+};
+
+/** Same look as Fluent ExpandButton but toggling is driven by quick-command row logic. */
+class QuickCmdExpandButton : public ExpandButton
+{
+  public:
+    explicit QuickCmdExpandButton(QWidget *parent = nullptr) : ExpandButton(parent)
+    {
+        disconnect(this, &QToolButton::clicked, this, nullptr);
+    }
 };
 
 QString commandNameMap(const QVariantMap &m) { return m.value(QStringLiteral("name")).toString(); }
@@ -364,16 +380,6 @@ void quickCommandApplyLineEndingToChecks(const QString &lineEnding, CheckBox *cr
     lf->setChecked(lineEnding == QStringLiteral("lf") || lineEnding == QStringLiteral("crlf"));
 }
 
-void updateQuickCommandModeButton(TransparentToolButton *btn, const QString &mode)
-{
-    if (!btn) {
-        return;
-    }
-    const bool hex = mode == QStringLiteral("hex");
-    btn->setIcon(icon(hex ? FluentIcon::Code : FluentIcon::Font));
-    AppUi::setFluentToolTip(btn, hex ? QStringLiteral("HEX") : AppI18n::text("文本"), ToolTipPosition::Top);
-}
-
 QVariantMap quickCommandMapFromInner(QWidget *inner, const QVariantMap &base)
 {
     QVariantMap m = base;
@@ -403,8 +409,7 @@ void updateQuickCommandTemplateMetaLabel(QWidget *inner, const QVariantMap &map)
     }
     if (QWidget *metaWidget = inner->findChild<QWidget *>(QStringLiteral("qcMetaLabel"))) {
         if (auto *meta = qobject_cast<FluentLabelBase *>(metaWidget)) {
-            meta->setText(modeLabel(map.value(QStringLiteral("mode")).toString()) + QStringLiteral(u" · ")
-                          + lineEndingLabel(map.value(QStringLiteral("lineEnding")).toString()));
+            meta->setText(lineEndingLabel(map.value(QStringLiteral("lineEnding")).toString()));
         }
     }
 }
@@ -422,6 +427,47 @@ void updateFixedCommandTitleLabel(QWidget *inner, const QString &name)
     }
 }
 
+void syncQuickCommandRowMoveButtons(QWidget *inner, bool expanded)
+{
+    if (!inner) {
+        return;
+    }
+    QWidget *card = inner->parentWidget();
+    QWidget *rowOuter = card ? card->parentWidget() : nullptr;
+    if (!rowOuter || !rowOuter->property(PropCommandRowOuter).toBool()) {
+        return;
+    }
+    if (QWidget *up = rowOuter->findChild<QWidget *>(QStringLiteral("qcCmdUpBtn"))) {
+        up->setVisible(expanded);
+    }
+    if (QWidget *down = rowOuter->findChild<QWidget *>(QStringLiteral("qcCmdDownBtn"))) {
+        down->setVisible(expanded);
+    }
+}
+
+void setQuickCommandCardExpanded(QWidget *inner, bool expanded)
+{
+    if (!inner) {
+        return;
+    }
+    inner->setProperty("qcCommandExpanded", expanded);
+    if (QWidget *body = inner->findChild<QWidget *>(QStringLiteral("qcCommandBody"))) {
+        body->setVisible(expanded);
+    }
+    if (QWidget *meta = inner->findChild<QWidget *>(QStringLiteral("qcMetaLabel"))) {
+        meta->setVisible(expanded);
+    }
+    if (auto *btn = inner->findChild<ExpandButton *>(QStringLiteral("qcCommandExpandBtn"))) {
+        const QSignalBlocker blocker(btn);
+        btn->setExpand(expanded);
+    }
+    if (auto *vl = qobject_cast<QVBoxLayout *>(inner->layout())) {
+        vl->setContentsMargins(10, 8, 10, expanded ? 8 : 4);
+        vl->setSpacing(expanded ? 8 : 0);
+    }
+    syncQuickCommandRowMoveButtons(inner, expanded);
+}
+
 void setFixedCommandTitleEditMode(QWidget *inner, bool editing)
 {
     if (!inner) {
@@ -436,6 +482,9 @@ void setFixedCommandTitleEditMode(QWidget *inner, bool editing)
     }
     if (QWidget *confirmBtn = inner->findChild<QWidget *>(QStringLiteral("qcNameConfirmBtn"))) {
         confirmBtn->setVisible(editing);
+    }
+    if (editing) {
+        setQuickCommandCardExpanded(inner, true);
     }
 }
 
@@ -531,6 +580,7 @@ SimpleCardWidget *buildCommandRowWidget(const QVariantMap &map, bool isTemplate)
     vl->setSpacing(8);
 
     auto *titleRow = new QWidget(inner);
+    titleRow->setMinimumHeight(CompactControlHeight);
     auto *hlTop = new QHBoxLayout(titleRow);
     hlTop->setContentsMargins(0, 0, 0, 0);
     hlTop->setSpacing(8);
@@ -540,9 +590,7 @@ SimpleCardWidget *buildCommandRowWidget(const QVariantMap &map, bool isTemplate)
         auto *title = new StrongBodyLabel(displayName, titleRow);
         title->setObjectName(QStringLiteral("qcTitleLabel"));
         hlTop->addWidget(title, 1);
-        auto *meta = new CaptionLabel(modeLabel(map.value(QStringLiteral("mode")).toString()) + QStringLiteral(u" · ")
-                                          + lineEndingLabel(map.value(QStringLiteral("lineEnding")).toString()),
-                                      titleRow);
+        auto *meta = new CaptionLabel(lineEndingLabel(map.value(QStringLiteral("lineEnding")).toString()), titleRow);
         meta->setObjectName(QStringLiteral("qcMetaLabel"));
         AppUi::setMutedTextColor(meta);
         hlTop->addWidget(meta, 0, Qt::AlignRight | Qt::AlignVCenter);
@@ -570,15 +618,21 @@ SimpleCardWidget *buildCommandRowWidget(const QVariantMap &map, bool isTemplate)
         AppUi::setFluentToolTip(confirmBtn, AppI18n::text("保存名称"), ToolTipPosition::Top);
         hlTop->addWidget(confirmBtn, 0, Qt::AlignVCenter);
 
-        auto *modeBtn = new TransparentToolButton(titleRow);
-        modeBtn->setObjectName(QStringLiteral("qcModeButton"));
-        makeToolbarSquareButton(modeBtn);
-        updateQuickCommandModeButton(modeBtn, map.value(QStringLiteral("mode"), QStringLiteral("text")).toString());
-        hlTop->addWidget(modeBtn, 0, Qt::AlignVCenter);
-
         setFixedCommandTitleEditMode(inner, storedName.trimmed().isEmpty());
     }
+
+    auto *expandBtn = new QuickCmdExpandButton(titleRow);
+    expandBtn->setObjectName(QStringLiteral("qcCommandExpandBtn"));
+    expandBtn->setFixedSize(CompactControlHeight, CompactControlHeight);
+    AppUi::setFluentToolTip(expandBtn, AppI18n::text("展开或收起"), ToolTipPosition::Top);
+    hlTop->addWidget(expandBtn, 0, Qt::AlignVCenter);
     vl->addWidget(titleRow);
+
+    auto *body = new QWidget(inner);
+    body->setObjectName(QStringLiteral("qcCommandBody"));
+    auto *bodyVl = new QVBoxLayout(body);
+    bodyVl->setContentsMargins(0, 0, 0, 0);
+    bodyVl->setSpacing(8);
 
     if (isTemplate) {
         QJsonParseError pe1;
@@ -615,7 +669,7 @@ SimpleCardWidget *buildCommandRowWidget(const QVariantMap &map, bool isTemplate)
             phl->addWidget(edit, 1);
             paramOuter->addWidget(row);
         }
-        vl->addWidget(paramSection);
+        bodyVl->addWidget(paramSection);
     } else {
         auto *payloadEdit = new LineEdit(inner);
         payloadEdit->setObjectName(QStringLiteral("qcPayloadEdit"));
@@ -624,10 +678,10 @@ SimpleCardWidget *buildCommandRowWidget(const QVariantMap &map, bool isTemplate)
         payloadEdit->setMinimumHeight(CompactControlHeight);
         payloadEdit->setFixedHeight(CompactControlHeight);
         payloadEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-        vl->addWidget(payloadEdit);
+        bodyVl->addWidget(payloadEdit);
     }
 
-    auto *previewHeader = new QWidget(inner);
+    auto *previewHeader = new QWidget(body);
     auto *previewHeaderHl = new QHBoxLayout(previewHeader);
     previewHeaderHl->setContentsMargins(0, 0, 0, 0);
     previewHeaderHl->setSpacing(8);
@@ -648,23 +702,26 @@ SimpleCardWidget *buildCommandRowWidget(const QVariantMap &map, bool isTemplate)
                                         crCheck, lfCheck);
     previewHeaderHl->addWidget(crCheck, 0, Qt::AlignVCenter);
     previewHeaderHl->addWidget(lfCheck, 0, Qt::AlignVCenter);
-    vl->addWidget(previewHeader);
+    bodyVl->addWidget(previewHeader);
 
-    auto *incomplete = new CaptionLabel(QString(), inner);
+    auto *incomplete = new CaptionLabel(QString(), body);
     incomplete->setObjectName(QStringLiteral("qcIncompleteHint"));
     incomplete->hide();
     AppUi::setMutedTextColor(incomplete);
     applyQuickCommandWrappingLabel(incomplete);
-    vl->addWidget(incomplete);
+    bodyVl->addWidget(incomplete);
 
-    auto *preview = new QuickCommandPreviewPane(inner);
+    auto *preview = new QuickCommandPreviewPane(body);
+    bodyVl->addWidget(preview);
+    vl->addWidget(body);
+
+    const bool startExpanded = !isTemplate && commandNameMap(map).trimmed().isEmpty();
+    setQuickCommandCardExpanded(inner, startExpanded);
 
     auto *cardLayout = new QVBoxLayout(card);
     cardLayout->setContentsMargins(6, 4, 6, 4);
     cardLayout->setSpacing(0);
     cardLayout->addWidget(inner);
-
-    vl->addWidget(preview);
 
     card->setProperty(PropCommandData, map);
     setQuickCommandRowPreview(inner, map);
@@ -686,19 +743,10 @@ class QuickCommandTemplateEditDialog : public QDialog
         m_nameEdit = new LineEdit(this);
         m_nameEdit->setText(initial.value(QStringLiteral("name")).toString());
 
-        m_modeCombo = new ComboBox(this);
-        m_modeCombo->addItem(AppI18n::text("文本"), QIcon(), QStringLiteral("text"));
-        m_modeCombo->addItem(QStringLiteral("HEX"), QIcon(), QStringLiteral("hex"));
-        const QString mode = initial.value(QStringLiteral("mode"), QStringLiteral("text")).toString();
-        const int modeIdx = m_modeCombo->findData(mode == QStringLiteral("hex") ? QStringLiteral("hex")
-                                                                              : QStringLiteral("text"));
-        m_modeCombo->setCurrentIndex(modeIdx >= 0 ? modeIdx : 0);
-
         m_enabledCheck = new CheckBox(AppI18n::text("启用"), this);
         m_enabledCheck->setChecked(initial.value(QStringLiteral("enabled"), true).toBool());
 
         form->addRow(AppI18n::text("名称"), m_nameEdit);
-        form->addRow(AppI18n::text("模式"), m_modeCombo);
         form->addRow(QString(), m_enabledCheck);
         layout->addLayout(form);
 
@@ -751,7 +799,7 @@ class QuickCommandTemplateEditDialog : public QDialog
     {
         QVariantMap m;
         m.insert(QStringLiteral("name"), m_nameEdit->text().trimmed());
-        m.insert(QStringLiteral("mode"), m_modeCombo->currentData().toString());
+        m.insert(QStringLiteral("mode"), QStringLiteral("text"));
         m.insert(QStringLiteral("lineEnding"), m_lineEnding);
         m.insert(QStringLiteral("enabled"), m_enabledCheck->isChecked());
         m.insert(QStringLiteral("templateText"), m_templateEdit->toPlainText());
@@ -818,7 +866,6 @@ class QuickCommandTemplateEditDialog : public QDialog
 
     QString m_lineEnding;
     LineEdit *m_nameEdit = nullptr;
-    ComboBox *m_modeCombo = nullptr;
     CheckBox *m_enabledCheck = nullptr;
     PlainTextEdit *m_templateEdit = nullptr;
     QWidget *m_paramContainer = nullptr;
@@ -1199,20 +1246,28 @@ SimpleCardWidget *WorkbenchPage::insertQuickCommandRow(QVBoxLayout *targetLay, i
     auto *rvl = new QVBoxLayout(rightCol);
     rvl->setContentsMargins(0, 0, 0, 0);
     rvl->setSpacing(4);
-    auto *sendBtn = new TransparentToolButton(icon(FluentIcon::Send), rightCol);
+    auto *sendTitleBand = new QWidget(rightCol);
+    sendTitleBand->setFixedHeight(kQcCommandTitleChromeHeight);
+    auto *sendBandLayout = new QVBoxLayout(sendTitleBand);
+    sendBandLayout->setContentsMargins(0, kQcCommandCardTopInset + kQcCommandInnerTopMargin, 0, 0);
+    sendBandLayout->setSpacing(0);
+    auto *sendBtn = new TransparentToolButton(icon(FluentIcon::Send), sendTitleBand);
     sendBtn->setObjectName(QStringLiteral("qcSendBtn"));
     sendBtn->setProperty(PropSendBtn, true);
     makeToolbarSquareButton(sendBtn);
     AppUi::setFluentToolTip(sendBtn, AppI18n::text("发送"));
     sendBtn->setEnabled(m_serial.isOpen() && map.value(QStringLiteral("enabled"), true).toBool());
     connect(sendBtn, &QToolButton::clicked, this, [this, cmdRow]() { sendQuickCommandRow(cmdRow); });
+    sendBandLayout->addWidget(sendBtn, 0, Qt::AlignHCenter);
     auto *upMoveBtn = new QuickCmdChevronButton(QuickCmdChevronKind::Up, rightCol, CompactControlHeight);
+    upMoveBtn->setObjectName(QStringLiteral("qcCmdUpBtn"));
     AppUi::setFluentToolTip(upMoveBtn, AppI18n::text("上移"));
     connect(upMoveBtn, &QToolButton::clicked, this, [this, rowOuter]() { moveQuickCommandsBlock(rowOuter, -1); });
     auto *downMoveBtn = new QuickCmdChevronButton(QuickCmdChevronKind::Down, rightCol, CompactControlHeight);
+    downMoveBtn->setObjectName(QStringLiteral("qcCmdDownBtn"));
     AppUi::setFluentToolTip(downMoveBtn, AppI18n::text("下移"));
     connect(downMoveBtn, &QToolButton::clicked, this, [this, rowOuter]() { moveQuickCommandsBlock(rowOuter, 1); });
-    rvl->addWidget(sendBtn, 0, Qt::AlignHCenter);
+    rvl->addWidget(sendTitleBand, 0, Qt::AlignTop);
     rvl->addWidget(upMoveBtn, 0, Qt::AlignHCenter);
     rvl->addWidget(downMoveBtn, 0, Qt::AlignHCenter);
     connect(cmdRow, &SimpleCardWidget::clicked, this, [this, cmdRow]() {
@@ -1237,6 +1292,20 @@ SimpleCardWidget *WorkbenchPage::insertQuickCommandRow(QVBoxLayout *targetLay, i
 
     QWidget *inner = cmdRow->findChild<QWidget *>(QStringLiteral("qcCommandInner"));
     if (inner) {
+        const bool rowExpanded = inner->property("qcCommandExpanded").toBool();
+        upMoveBtn->setVisible(rowExpanded);
+        downMoveBtn->setVisible(rowExpanded);
+        if (ExpandButton *cmdExpandBtn = inner->findChild<ExpandButton *>(QStringLiteral("qcCommandExpandBtn"))) {
+            connect(cmdExpandBtn, &QToolButton::clicked, this, [this, inner, cmdRow]() {
+                const bool expanded = !inner->property("qcCommandExpanded").toBool();
+                setQuickCommandCardExpanded(inner, expanded);
+                if (expanded) {
+                    refreshQuickCommandRowPreview(cmdRow);
+                    QTimer::singleShot(0, this,
+                                        [this]() { relayoutAllQuickCommandPreviews(m_quickCommandsListHost); });
+                }
+            });
+        }
         const auto persistRow = [this, cmdRow, parentFolder, inner]() {
             const QVariantMap live =
                 quickCommandMapFromInner(inner, cmdRow->property(PropCommandData).toMap());
@@ -1266,6 +1335,7 @@ SimpleCardWidget *WorkbenchPage::insertQuickCommandRow(QVBoxLayout *targetLay, i
                 cmdRow->setProperty(PropCommandData, m);
                 updateFixedCommandTitleLabel(inner, name);
                 setFixedCommandTitleEditMode(inner, false);
+                setQuickCommandCardExpanded(inner, false);
                 persistRow();
             });
         }
@@ -1286,18 +1356,6 @@ SimpleCardWidget *WorkbenchPage::insertQuickCommandRow(QVBoxLayout *targetLay, i
                     persistRow();
                 });
             }
-        }
-        if (QToolButton *modeBtn = inner->findChild<QToolButton *>(QStringLiteral("qcModeButton"))) {
-            connect(modeBtn, &QToolButton::clicked, this, [this, cmdRow, modeBtn, refreshPreview, persistRow]() {
-                QVariantMap m = cmdRow->property(PropCommandData).toMap();
-                const QString cur = m.value(QStringLiteral("mode"), QStringLiteral("text")).toString();
-                const QString next = cur == QStringLiteral("hex") ? QStringLiteral("text") : QStringLiteral("hex");
-                m.insert(QStringLiteral("mode"), next);
-                cmdRow->setProperty(PropCommandData, m);
-                updateQuickCommandModeButton(static_cast<TransparentToolButton *>(modeBtn), next);
-                refreshPreview();
-                persistRow();
-            });
         }
         const auto wireParamEdits = [this, inner, refreshPreview, persistRow]() {
             for (LineEdit *e : inner->findChildren<LineEdit *>()) {
@@ -1561,8 +1619,7 @@ QJsonObject WorkbenchPage::quickCommandsCommandRowToJson(QWidget *rowWidget) con
     }
     const QString body = isTemplate ? m.value(QStringLiteral("templateText")).toString()
                                     : m.value(QStringLiteral("payload")).toString();
-    return commandNodeToJson(commandNameMap(m), m.value(QStringLiteral("mode")).toString(),
-                           m.value(QStringLiteral("lineEnding")).toString(),
+    return commandNodeToJson(commandNameMap(m), QStringLiteral("text"), m.value(QStringLiteral("lineEnding")).toString(),
                            m.value(QStringLiteral("enabled"), true).toBool(), isTemplate, body, hints, defaults);
 }
 
@@ -1714,7 +1771,8 @@ void WorkbenchPage::sendQuickCommandRow(QWidget *rowWidget)
         showWarning(AppI18n::text("无法发送"), AppI18n::text("该命令已停用"));
         return;
     }
-    const QString mode = m.value(QStringLiteral("mode")).toString();
+    const QString mode =
+        m_hexSendCheck && m_hexSendCheck->isChecked() ? QStringLiteral("hex") : QStringLiteral("text");
     const QString lineEnding = m.value(QStringLiteral("lineEnding")).toString();
     QString payload;
     if (m.value(QStringLiteral("template")).toBool()) {

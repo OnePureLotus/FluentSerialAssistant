@@ -5,9 +5,13 @@
 
 #include <QtCore/QPointer>
 #include <QtCore/QThread>
+#include <QtGui/QClipboard>
+#include <QtGui/QGuiApplication>
 #include <QtGui/QHideEvent>
 #include <QtGui/QShowEvent>
+#include <QtGui/QKeyEvent>
 #include <QtGui/QMouseEvent>
+#include <QtWidgets/QApplication>
 
 using namespace FluentQt;
 using namespace WorkbenchPagePrivate;
@@ -369,6 +373,21 @@ bool WorkbenchPage::eventFilter(QObject *watched, QEvent *event)
         if (enterKey && keyEvent->modifiers().testFlag(Qt::ControlModifier)) {
             sendCurrentPayload();
             return true;
+        }
+        if (m_hexSendCheck && m_hexSendCheck->isChecked() && !sendEditorHexKeyNavigation(keyEvent)) {
+            if (keyEvent->matches(QKeySequence::Paste)) {
+                const QString clip = QGuiApplication::clipboard()->text();
+                if (!sendEditorHexInputAllowed(clip)) {
+                    showWarning(AppI18n::text("HEX 输入无效"), AppI18n::text("粘贴内容包含非 HEX 字符"));
+                    return true;
+                }
+            } else {
+                const QString text = keyEvent->text();
+                if (!text.isEmpty() && !sendEditorHexInputAllowed(text)) {
+                    showWarning(AppI18n::text("HEX 输入无效"), AppI18n::text("只能输入十六进制字符或空格等分隔符"));
+                    return true;
+                }
+            }
         }
     }
     return AppPage::eventFilter(watched, event);

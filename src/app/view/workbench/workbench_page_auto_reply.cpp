@@ -361,7 +361,8 @@ void WorkbenchPage::sendAutoReplyRule(const AutoReplyRule &rule)
         return;
     }
 
-    appendRecord(RecordDirection::Tx, output, true, AppI18n::text("自动应答"));
+    appendRecord(RecordDirection::Tx, output, true, AppI18n::text("自动应答"), false,
+                 rule.responseMode == QStringLiteral("hex"));
     if (m_autoReplyStatusLabel) {
         const QString name = rule.name.isEmpty() ? rule.pattern.simplified() : rule.name;
         m_autoReplyStatusLabel->setText(AppI18n::text("已应答：%1").arg(name));

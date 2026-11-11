@@ -656,11 +656,7 @@ QWidget *WorkbenchPage::createSendSettingsSection()
                           numberEditValue(m_checksumSkipTrailingEdit, 0, 0, MaxChecksumSkipBytes));
     });
     connect(m_checksumCalcButton, &PushButton::clicked, this, &WorkbenchPage::calculateChecksumForCurrentPayload);
-    connect(m_hexSendCheck, &CheckBox::toggled, this, [this](bool checked) {
-        AppSettings settings;
-        settings.setValue(QStringLiteral("send/mode"), checked ? QStringLiteral("hex") : QStringLiteral("text"));
-        updateSendModeButton();
-    });
+    connect(m_hexSendCheck, &CheckBox::toggled, this, &WorkbenchPage::onHexSendCheckToggled);
     connect(m_showTxCheck, &CheckBox::toggled, this, [this](bool checked) {
         AppSettings settings;
         settings.setValue(QStringLiteral("send/showTx"), checked);

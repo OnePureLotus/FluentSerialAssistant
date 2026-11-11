@@ -372,7 +372,7 @@ void WorkbenchPage::runMacroCurrentStep()
     historyItem.payload = step.payload;
     historyItem.lineEnding = step.lineEnding;
     addSendHistory(historyItem);
-    appendRecord(RecordDirection::Tx, output);
+    appendRecord(RecordDirection::Tx, output, true, QString(), false, step.mode == QStringLiteral("hex"));
 
     result.txBytes = output;
     m_macroResults.append(result);

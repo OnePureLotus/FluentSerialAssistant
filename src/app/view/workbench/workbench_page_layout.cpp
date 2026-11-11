@@ -25,8 +25,8 @@ QWidget *WorkbenchPage::createWorkbench()
     sideLayout->setSizeConstraint(QLayout::SetMinAndMaxSize);
     sideLayout->addWidget(createConnectionSection());
     sideLayout->addWidget(createReceiveSettingsSection());
-    sideLayout->addWidget(createProtocolTemplateSection());
     sideLayout->addWidget(createSendSettingsSection());
+    sideLayout->addWidget(createProtocolTemplateSection());
     sideLayout->addWidget(createModbusSection());
     sideLayout->addWidget(createPacketSection());
     sideLayout->addWidget(createMacroSection());

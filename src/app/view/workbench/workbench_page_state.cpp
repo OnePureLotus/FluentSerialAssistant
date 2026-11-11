@@ -188,7 +188,7 @@ void WorkbenchPage::restoreSettings()
         m_displayModeSegment->setCurrentItem(displayMode);
     }
     selectEncodingOption(m_receiveEncodingCombo, receiveEncoding);
-    m_hexSendCheck->setChecked(sendMode == QStringLiteral("hex"));
+    applySendEditorState(sendMode == QStringLiteral("hex"), sendPayload);
     selectEncodingOption(m_sendEncodingCombo, sendEncoding);
     selectChecksumAlgorithm(m_checksumAlgorithmCombo, checksumAlgorithm);
     const int checksumByteOrderIndex =
@@ -233,7 +233,6 @@ void WorkbenchPage::restoreSettings()
     m_txColorButton->setColor(txColor.isValid() ? txColor : defaultTxColor());
     m_txColorButton->setEnabled(m_showTxCheck->isChecked());
     m_autoReconnectCheck->setChecked(settings.value(QStringLiteral("serial/autoReconnect"), true).toBool());
-    m_sendEdit->setPlainText(sendPayload);
     m_packetGroupEdit->setText(packetGroup);
     m_packetNameEdit->setText(packetName);
     m_packetNoteEdit->setText(packetNote);
@@ -414,7 +413,7 @@ void WorkbenchPage::copySessionConfigFrom(const WorkbenchPage &source)
     resetAutoLogSession();
     updateAutoLogStatus();
 
-    m_hexSendCheck->setChecked(source.m_hexSendCheck->isChecked());
+    applySendEditorState(source.m_hexSendCheck->isChecked(), source.m_sendEdit->toPlainText());
     m_showTxCheck->setChecked(source.m_showTxCheck->isChecked());
     m_txColorButton->setColor(source.selectedTxColor());
     m_txColorButton->setEnabled(m_showTxCheck->isChecked());
@@ -443,7 +442,6 @@ void WorkbenchPage::copySessionConfigFrom(const WorkbenchPage &source)
         m_lineEndingCombo->setCurrentIndex(lineEndingIndex);
     }
 
-    m_sendEdit->setPlainText(source.m_sendEdit->toPlainText());
     m_sendHistory = source.m_sendHistory;
     updateHistoryCombo();
 
@@ -690,12 +688,11 @@ void WorkbenchPage::applyHistoryItem(int index)
     }
 
     const SendHistoryItem item = m_sendHistory.at(historyIndex);
-    m_hexSendCheck->setChecked(item.mode == QStringLiteral("hex"));
+    applySendEditorState(item.mode == QStringLiteral("hex"), item.payload);
     const int lineEndingIndex = m_lineEndingCombo->findData(item.lineEnding);
     if (lineEndingIndex >= 0) {
         m_lineEndingCombo->setCurrentIndex(lineEndingIndex);
     }
-    m_sendEdit->setPlainText(item.payload);
 }
 
 void WorkbenchPage::showInfo(const QString &title, const QString &message)

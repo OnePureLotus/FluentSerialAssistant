@@ -145,12 +145,11 @@ void WorkbenchPage::applyPacket(int row)
         m_packetLineEndingCombo->setCurrentIndex(packetLineEndingIndex);
     }
 
-    m_hexSendCheck->setChecked(packet.mode == QStringLiteral("hex"));
+    applySendEditorState(packet.mode == QStringLiteral("hex"), packet.payload);
     const int lineEndingIndex = m_lineEndingCombo->findData(packet.lineEnding);
     if (lineEndingIndex >= 0) {
         m_lineEndingCombo->setCurrentIndex(lineEndingIndex);
     }
-    m_sendEdit->setPlainText(packet.payload);
 }
 
 void WorkbenchPage::saveCurrentPacket()
@@ -333,7 +332,8 @@ bool WorkbenchPage::sendPacketPayload(const SendPacket &packet)
     historyItem.payload = packet.payload;
     historyItem.lineEnding = packet.lineEnding;
     addSendHistory(historyItem);
-    appendRecord(RecordDirection::Tx, output);
+    appendRecord(RecordDirection::Tx, output, true, QString(), false,
+                 packet.mode == QStringLiteral("hex"));
     return true;
 }
 

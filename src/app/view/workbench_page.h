@@ -22,6 +22,8 @@
 #include <QtCore/QVector>
 #include <QtGui/QColor>
 
+#include <optional>
+
 class QEvent;
 class QHideEvent;
 class QShowEvent;
@@ -124,6 +126,8 @@ class WorkbenchPage : public AppPage, public AppControl::SessionControl
         QString displayText;
         QString sourceLabel;
         bool receivedAsStream = false;
+        /** 发送记录：以 HEX 发送时在终端按 HEX 显示（与接收区显示模式无关） */
+        bool txDisplayAsHex = false;
     };
 
     struct TerminalRecordRange
@@ -219,6 +223,10 @@ class WorkbenchPage : public AppPage, public AppControl::SessionControl
     void updateRateStats();
     void updateReceiveModeButton();
     void updateSendModeButton();
+    void onHexSendCheckToggled(bool checked);
+    void applySendEditorState(bool hexMode, const QString &payload);
+    bool sendEditorHexInputAllowed(const QString &text) const;
+    bool sendEditorHexKeyNavigation(const QKeyEvent *keyEvent) const;
     void applyTerminalSendSplitterSizes();
     void updateSendQuickSuffixChecks();
     void syncSendQuickSuffixChecksFromLineEndingCombo();
@@ -356,7 +364,8 @@ class WorkbenchPage : public AppPage, public AppControl::SessionControl
     void insertProtocolTemplateExample();
     QString protocolParseSourceLabel(const QByteArray &data);
     void appendRecord(RecordDirection direction, const QByteArray &data, bool updateStats = true,
-                      const QString &sourceLabel = QString(), bool receivedAsStream = false);
+                      const QString &sourceLabel = QString(), bool receivedAsStream = false,
+                      std::optional<bool> txSentAsHex = std::nullopt);
     void trimRecords();
     void clearTerminal();
     void renderTerminal(bool navigateToMatch = false);

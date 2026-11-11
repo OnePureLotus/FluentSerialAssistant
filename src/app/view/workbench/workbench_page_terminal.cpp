@@ -1,10 +1,23 @@
 #include "app/core/app_i18n.h"
+#include "app/core/hex_utils.h"
+#include "app/core/text_encoding.h"
 #include "app/view/workbench/workbench_page_internal.h"
 
 #include <QtGui/QTextBlock>
 
 using namespace FluentQt;
 using namespace WorkbenchPagePrivate;
+
+namespace {
+
+bool isHexDisplayChar(QChar ch)
+{
+    return (ch >= QLatin1Char('0') && ch <= QLatin1Char('9')) || (ch >= QLatin1Char('a') && ch <= QLatin1Char('f')) ||
+           (ch >= QLatin1Char('A') && ch <= QLatin1Char('F')) || ch.isSpace() || ch == QLatin1Char(',') ||
+           ch == QLatin1Char(';') || ch == QLatin1Char('-');
+}
+
+} // namespace
 
 SerialPortConfig WorkbenchPage::currentSerialConfig() const
 {
@@ -21,6 +34,101 @@ SerialPortConfig WorkbenchPage::currentSerialConfig() const
     config.requestToSend = m_rtsCheck->isChecked();
     config.dataTerminalReady = m_dtrCheck->isChecked();
     return config;
+}
+
+bool WorkbenchPage::sendEditorHexInputAllowed(const QString &text) const
+{
+    for (const QChar &ch : text) {
+        if (!isHexDisplayChar(ch)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool WorkbenchPage::sendEditorHexKeyNavigation(const QKeyEvent *keyEvent) const
+{
+    if (!keyEvent) {
+        return true;
+    }
+    switch (keyEvent->key()) {
+    case Qt::Key_Backspace:
+    case Qt::Key_Delete:
+    case Qt::Key_Left:
+    case Qt::Key_Right:
+    case Qt::Key_Up:
+    case Qt::Key_Down:
+    case Qt::Key_Home:
+    case Qt::Key_End:
+    case Qt::Key_PageUp:
+    case Qt::Key_PageDown:
+    case Qt::Key_Escape:
+    case Qt::Key_Tab:
+    case Qt::Key_Return:
+    case Qt::Key_Enter:
+    case Qt::Key_Insert:
+        return true;
+    default:
+        break;
+    }
+    if (keyEvent->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) {
+        return true;
+    }
+    return false;
+}
+
+void WorkbenchPage::applySendEditorState(bool hexMode, const QString &payload)
+{
+    if (!m_hexSendCheck || !m_sendEdit) {
+        return;
+    }
+    const QSignalBlocker blockHex(m_hexSendCheck);
+    m_hexSendCheck->setChecked(hexMode);
+    m_sendEdit->setPlainText(payload);
+    updateSendModeButton();
+}
+
+void WorkbenchPage::onHexSendCheckToggled(bool checked)
+{
+    if (!m_hexSendCheck || !m_sendEdit) {
+        return;
+    }
+
+    const QString current = m_sendEdit->toPlainText();
+    if (checked) {
+        if (!current.isEmpty()) {
+            const AppTextEncoding::EncodeResult enc = AppTextEncoding::encode(current, sendEncodingKey());
+            if (!enc.ok) {
+                const QSignalBlocker block(m_hexSendCheck);
+                m_hexSendCheck->setChecked(false);
+                updateSendModeButton();
+                showWarning(AppI18n::text("无法切换为 HEX 发送"),
+                            enc.errorMessage.isEmpty() ? AppI18n::text("当前文本无法按发送编码转换为字节，请修正或清空发送区后再切换")
+                                                       : enc.errorMessage);
+                return;
+            }
+            m_sendEdit->setPlainText(bytesToHex(enc.bytes));
+        }
+    } else if (!current.trimmed().isEmpty()) {
+        const HexParseResult parsed = parseHexPayload(current);
+        if (!parsed.ok) {
+            const QSignalBlocker block(m_hexSendCheck);
+            m_hexSendCheck->setChecked(true);
+            updateSendModeButton();
+            const QString detail =
+                parsed.errorOffset >= 0
+                    ? AppI18n::text("%1，位置 %2").arg(parsed.errorMessage).arg(parsed.errorOffset + 1)
+                    : parsed.errorMessage;
+            showWarning(AppI18n::text("无法切换为文本发送"),
+                        AppI18n::text("%1。请先清空发送区或修正 HEX 后再切换。").arg(detail));
+            return;
+        }
+        m_sendEdit->setPlainText(AppTextEncoding::decode(parsed.bytes, sendEncodingKey()));
+    }
+
+    AppSettings settings;
+    settings.setValue(QStringLiteral("send/mode"), checked ? QStringLiteral("hex") : QStringLiteral("text"));
+    updateSendModeButton();
 }
 
 QByteArray WorkbenchPage::currentPayload(bool *ok)
@@ -239,14 +347,24 @@ QString WorkbenchPage::formatRecordLine(const SessionRecord &record, int *conten
         return {};
     }
 
-    const QString mode = currentDisplayMode();
     QString payload;
-    if (mode == QStringLiteral("hex")) {
-        payload = bytesToHex(record.bytes);
-    } else if (mode == QStringLiteral("mixed")) {
-        payload = QStringLiteral("%1    | %2").arg(bytesToHex(record.bytes), record.displayText);
+    if (record.direction == RecordDirection::Tx) {
+        if (record.txDisplayAsHex) {
+            payload = bytesToHex(record.bytes);
+        } else {
+            payload =
+                (!m_timestampCheck || !m_timestampCheck->isChecked()) ? record.terminalText : record.displayText;
+        }
     } else {
-        payload = (!m_timestampCheck || !m_timestampCheck->isChecked()) ? record.terminalText : record.displayText;
+        const QString mode = currentDisplayMode();
+        if (mode == QStringLiteral("hex")) {
+            payload = bytesToHex(record.bytes);
+        } else if (mode == QStringLiteral("mixed")) {
+            payload = QStringLiteral("%1    | %2").arg(bytesToHex(record.bytes), record.displayText);
+        } else {
+            payload =
+                (!m_timestampCheck || !m_timestampCheck->isChecked()) ? record.terminalText : record.displayText;
+        }
     }
 
     QString marker = record.direction == RecordDirection::Tx ? QStringLiteral("»") : QStringLiteral("«");
@@ -438,7 +556,7 @@ void WorkbenchPage::updateFrameControlState()
 }
 
 void WorkbenchPage::appendRecord(RecordDirection direction, const QByteArray &data, bool updateStats,
-                                 const QString &sourceLabel, bool receivedAsStream)
+                                 const QString &sourceLabel, bool receivedAsStream, std::optional<bool> txSentAsHex)
 {
     if (data.isEmpty()) {
         return;
@@ -473,6 +591,10 @@ void WorkbenchPage::appendRecord(RecordDirection direction, const QByteArray &da
     record.displayText = AppTextEncoding::toSingleLineText(decoded);
     record.sourceLabel = sourceLabel;
     record.receivedAsStream = receivedAsStream;
+    if (direction == RecordDirection::Tx) {
+        record.txDisplayAsHex =
+            txSentAsHex.has_value() ? *txSentAsHex : (m_hexSendCheck && m_hexSendCheck->isChecked());
+    }
     if (direction == RecordDirection::Rx) {
         const QString protocolLabel = protocolParseSourceLabel(data);
         if (!protocolLabel.isEmpty()) {

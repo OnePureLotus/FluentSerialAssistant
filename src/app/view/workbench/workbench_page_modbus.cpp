@@ -122,7 +122,6 @@ void WorkbenchPage::fillModbusRequest()
         return;
     }
 
-    m_hexSendCheck->setChecked(true);
     const int eolIndex = m_lineEndingCombo->findData(QStringLiteral("none"));
     if (eolIndex >= 0) {
         m_lineEndingCombo->setCurrentIndex(eolIndex);
@@ -130,7 +129,7 @@ void WorkbenchPage::fillModbusRequest()
     if (m_checksumAppendCheck) {
         m_checksumAppendCheck->setChecked(false);
     }
-    m_sendEdit->setPlainText(bytesToHex(frame));
+    applySendEditorState(true, bytesToHex(frame));
     setModbusStatusText(AppI18n::text("已填入发送区 · %1").arg(bytesToHex(frame)));
 }
 
@@ -158,7 +157,7 @@ void WorkbenchPage::sendModbusRequest()
     historyItem.payload = bytesToHex(frame);
     historyItem.lineEnding = QStringLiteral("none");
     addSendHistory(historyItem);
-    appendRecord(RecordDirection::Tx, frame);
+    appendRecord(RecordDirection::Tx, frame, true, QString(), false, true);
     setModbusStatusText(AppI18n::text("已发送 · %1").arg(bytesToHex(frame)));
 }
 
