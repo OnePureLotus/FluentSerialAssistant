@@ -20,6 +20,21 @@ QList<WorkbenchPage *> &openWorkbenchPages()
     return pages;
 }
 
+bool quickCommandsFolderHeaderClickOnExpandButton(const HeaderSettingCard *hdr, const QPoint &pos)
+{
+    if (!hdr) {
+        return false;
+    }
+    QWidget *w = hdr->childAt(pos);
+    while (w && w != hdr) {
+        if (qobject_cast<const ExpandButton *>(w)) {
+            return true;
+        }
+        w = w->parentWidget();
+    }
+    return false;
+}
+
 } // namespace
 
 WorkbenchPage::WorkbenchPage(QWidget *parent, bool restoreSavedSession, bool allowAutoOpen)
@@ -316,6 +331,21 @@ bool WorkbenchPage::eventFilter(QObject *watched, QEvent *event)
     if (event->type() == QEvent::Wheel) {
         if (forwardSidePanelWheelEvent(watched, static_cast<QWheelEvent *>(event))) {
             return true;
+        }
+    }
+
+    if (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseButtonRelease) {
+        auto *hdr = qobject_cast<HeaderSettingCard *>(qobject_cast<QWidget *>(watched));
+        if (hdr && hdr->objectName() == QLatin1String("qcQuickCmdFolderHeader")) {
+            auto *me = static_cast<QMouseEvent *>(event);
+            if (me->button() == Qt::LeftButton && !quickCommandsFolderHeaderClickOnExpandButton(hdr, me->pos())) {
+                if (event->type() == QEvent::MouseButtonRelease) {
+                    if (auto *folder = qobject_cast<ExpandSettingCard *>(hdr->parentWidget())) {
+                        quickCommandsHandleListClick(folder);
+                    }
+                }
+                return true;
+            }
         }
     }
 

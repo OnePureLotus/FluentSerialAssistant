@@ -334,6 +334,111 @@ void updateFolderCardSubtitle(ExpandSettingCard *card)
     }
 }
 
+QString quickCommandLineEndingFromChecks(const CheckBox *cr, const CheckBox *lf)
+{
+    if (!cr || !lf) {
+        return QStringLiteral("none");
+    }
+    const bool crOn = cr->isChecked();
+    const bool lfOn = lf->isChecked();
+    if (crOn && lfOn) {
+        return QStringLiteral("crlf");
+    }
+    if (crOn) {
+        return QStringLiteral("cr");
+    }
+    if (lfOn) {
+        return QStringLiteral("lf");
+    }
+    return QStringLiteral("none");
+}
+
+void quickCommandApplyLineEndingToChecks(const QString &lineEnding, CheckBox *cr, CheckBox *lf)
+{
+    if (!cr || !lf) {
+        return;
+    }
+    const QSignalBlocker bc(cr);
+    const QSignalBlocker bl(lf);
+    cr->setChecked(lineEnding == QStringLiteral("cr") || lineEnding == QStringLiteral("crlf"));
+    lf->setChecked(lineEnding == QStringLiteral("lf") || lineEnding == QStringLiteral("crlf"));
+}
+
+void updateQuickCommandModeButton(TransparentToolButton *btn, const QString &mode)
+{
+    if (!btn) {
+        return;
+    }
+    const bool hex = mode == QStringLiteral("hex");
+    btn->setIcon(icon(hex ? FluentIcon::Code : FluentIcon::Font));
+    AppUi::setFluentToolTip(btn, hex ? QStringLiteral("HEX") : AppI18n::text("文本"), ToolTipPosition::Top);
+}
+
+QVariantMap quickCommandMapFromInner(QWidget *inner, const QVariantMap &base)
+{
+    QVariantMap m = base;
+    if (!inner) {
+        return m;
+    }
+    if (inner->property("qcFixedTitleEditing").toBool()) {
+        if (LineEdit *name = inner->findChild<LineEdit *>(QStringLiteral("qcNameEdit"))) {
+            m.insert(QStringLiteral("name"), name->text().trimmed());
+        }
+    }
+    if (LineEdit *payload = inner->findChild<LineEdit *>(QStringLiteral("qcPayloadEdit"))) {
+        m.insert(QStringLiteral("payload"), payload->text());
+    }
+    if (CheckBox *cr = inner->findChild<CheckBox *>(QStringLiteral("qcSuffixCrCheck"))) {
+        if (CheckBox *lf = inner->findChild<CheckBox *>(QStringLiteral("qcSuffixLfCheck"))) {
+            m.insert(QStringLiteral("lineEnding"), quickCommandLineEndingFromChecks(cr, lf));
+        }
+    }
+    return m;
+}
+
+void updateQuickCommandTemplateMetaLabel(QWidget *inner, const QVariantMap &map)
+{
+    if (!inner) {
+        return;
+    }
+    if (QWidget *metaWidget = inner->findChild<QWidget *>(QStringLiteral("qcMetaLabel"))) {
+        if (auto *meta = qobject_cast<FluentLabelBase *>(metaWidget)) {
+            meta->setText(modeLabel(map.value(QStringLiteral("mode")).toString()) + QStringLiteral(u" · ")
+                          + lineEndingLabel(map.value(QStringLiteral("lineEnding")).toString()));
+        }
+    }
+}
+
+void updateFixedCommandTitleLabel(QWidget *inner, const QString &name)
+{
+    if (!inner) {
+        return;
+    }
+    if (QWidget *titleWidget = inner->findChild<QWidget *>(QStringLiteral("qcTitleLabel"))) {
+        if (auto *title = qobject_cast<FluentLabelBase *>(titleWidget)) {
+            const QString display = name.trimmed().isEmpty() ? AppI18n::text("（未命名）") : name.trimmed();
+            title->setText(display);
+        }
+    }
+}
+
+void setFixedCommandTitleEditMode(QWidget *inner, bool editing)
+{
+    if (!inner) {
+        return;
+    }
+    inner->setProperty("qcFixedTitleEditing", editing);
+    if (QWidget *titleWidget = inner->findChild<QWidget *>(QStringLiteral("qcTitleLabel"))) {
+        titleWidget->setVisible(!editing);
+    }
+    if (LineEdit *nameEdit = inner->findChild<LineEdit *>(QStringLiteral("qcNameEdit"))) {
+        nameEdit->setVisible(editing);
+    }
+    if (QWidget *confirmBtn = inner->findChild<QWidget *>(QStringLiteral("qcNameConfirmBtn"))) {
+        confirmBtn->setVisible(editing);
+    }
+}
+
 QStringList quickCommandParamTextsFromRow(QWidget *rowWidget)
 {
     QStringList out;
@@ -425,23 +530,54 @@ SimpleCardWidget *buildCommandRowWidget(const QVariantMap &map, bool isTemplate)
     vl->setContentsMargins(10, 8, 10, 8);
     vl->setSpacing(8);
 
-    const QString displayName =
-        commandNameMap(map).isEmpty() ? AppI18n::text("（未命名）") : commandNameMap(map);
-
     auto *titleRow = new QWidget(inner);
     auto *hlTop = new QHBoxLayout(titleRow);
     hlTop->setContentsMargins(0, 0, 0, 0);
     hlTop->setSpacing(8);
-    auto *title = new StrongBodyLabel(displayName, titleRow);
-    applyQuickCommandWrappingLabel(title);
-    hlTop->addWidget(title, 1);
+    if (isTemplate) {
+        const QString displayName =
+            commandNameMap(map).isEmpty() ? AppI18n::text("（未命名）") : commandNameMap(map);
+        auto *title = new StrongBodyLabel(displayName, titleRow);
+        title->setObjectName(QStringLiteral("qcTitleLabel"));
+        hlTop->addWidget(title, 1);
+        auto *meta = new CaptionLabel(modeLabel(map.value(QStringLiteral("mode")).toString()) + QStringLiteral(u" · ")
+                                          + lineEndingLabel(map.value(QStringLiteral("lineEnding")).toString()),
+                                      titleRow);
+        meta->setObjectName(QStringLiteral("qcMetaLabel"));
+        AppUi::setMutedTextColor(meta);
+        hlTop->addWidget(meta, 0, Qt::AlignRight | Qt::AlignVCenter);
+    } else {
+        const QString storedName = commandNameMap(map);
+        const QString displayName = storedName.trimmed().isEmpty() ? AppI18n::text("（未命名）") : storedName.trimmed();
 
-    auto *meta = new CaptionLabel(
-        modeLabel(map.value(QStringLiteral("mode")).toString()) + QStringLiteral(u" · ") +
-            lineEndingLabel(map.value(QStringLiteral("lineEnding")).toString()),
-        titleRow);
-    AppUi::setMutedTextColor(meta);
-    hlTop->addWidget(meta, 0, Qt::AlignRight | Qt::AlignVCenter);
+        auto *title = new StrongBodyLabel(displayName, titleRow);
+        title->setObjectName(QStringLiteral("qcTitleLabel"));
+        title->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+        hlTop->addWidget(title, 1);
+
+        auto *nameEdit = new LineEdit(titleRow);
+        nameEdit->setObjectName(QStringLiteral("qcNameEdit"));
+        nameEdit->setPlaceholderText(AppI18n::text("名称"));
+        nameEdit->setText(storedName);
+        nameEdit->setMinimumHeight(CompactControlHeight);
+        nameEdit->setFixedHeight(CompactControlHeight);
+        nameEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        hlTop->addWidget(nameEdit, 1);
+
+        auto *confirmBtn = new TransparentToolButton(icon(FluentIcon::Completed), titleRow);
+        confirmBtn->setObjectName(QStringLiteral("qcNameConfirmBtn"));
+        makeToolbarSquareButton(confirmBtn);
+        AppUi::setFluentToolTip(confirmBtn, AppI18n::text("保存名称"), ToolTipPosition::Top);
+        hlTop->addWidget(confirmBtn, 0, Qt::AlignVCenter);
+
+        auto *modeBtn = new TransparentToolButton(titleRow);
+        modeBtn->setObjectName(QStringLiteral("qcModeButton"));
+        makeToolbarSquareButton(modeBtn);
+        updateQuickCommandModeButton(modeBtn, map.value(QStringLiteral("mode"), QStringLiteral("text")).toString());
+        hlTop->addWidget(modeBtn, 0, Qt::AlignVCenter);
+
+        setFixedCommandTitleEditMode(inner, storedName.trimmed().isEmpty());
+    }
     vl->addWidget(titleRow);
 
     if (isTemplate) {
@@ -452,7 +588,9 @@ SimpleCardWidget *buildCommandRowWidget(const QVariantMap &map, bool isTemplate)
         const QJsonArray defaults =
             QJsonDocument::fromJson(map.value(QStringLiteral("paramDefaultsJson")).toString().toUtf8(), &pe2).array();
         const int n = qMax(hints.size(), defaults.size());
+
         auto *paramSection = new QWidget(inner);
+        paramSection->setObjectName(QStringLiteral("qcParamSection"));
         auto *paramOuter = new QVBoxLayout(paramSection);
         paramOuter->setContentsMargins(0, 0, 0, 0);
         paramOuter->setSpacing(6);
@@ -478,11 +616,39 @@ SimpleCardWidget *buildCommandRowWidget(const QVariantMap &map, bool isTemplate)
             paramOuter->addWidget(row);
         }
         vl->addWidget(paramSection);
+    } else {
+        auto *payloadEdit = new LineEdit(inner);
+        payloadEdit->setObjectName(QStringLiteral("qcPayloadEdit"));
+        payloadEdit->setPlaceholderText(AppI18n::text("命令内容"));
+        payloadEdit->setText(map.value(QStringLiteral("payload")).toString());
+        payloadEdit->setMinimumHeight(CompactControlHeight);
+        payloadEdit->setFixedHeight(CompactControlHeight);
+        payloadEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        vl->addWidget(payloadEdit);
     }
 
-    auto *pvCap = new CaptionLabel(AppI18n::text("发送预览"), inner);
+    auto *previewHeader = new QWidget(inner);
+    auto *previewHeaderHl = new QHBoxLayout(previewHeader);
+    previewHeaderHl->setContentsMargins(0, 0, 0, 0);
+    previewHeaderHl->setSpacing(8);
+    auto *pvCap = new CaptionLabel(AppI18n::text("发送预览"), previewHeader);
     AppUi::setMutedTextColor(pvCap);
-    vl->addWidget(pvCap);
+    pvCap->setFixedHeight(CompactControlHeight);
+    pvCap->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
+    previewHeaderHl->addWidget(pvCap, 0, Qt::AlignVCenter);
+    previewHeaderHl->addStretch(1);
+    auto *crCheck = new CheckBox(QStringLiteral("CR"), previewHeader);
+    crCheck->setObjectName(QStringLiteral("qcSuffixCrCheck"));
+    auto *lfCheck = new CheckBox(QStringLiteral("LF"), previewHeader);
+    lfCheck->setObjectName(QStringLiteral("qcSuffixLfCheck"));
+    for (CheckBox *c : {crCheck, lfCheck}) {
+        c->setFixedHeight(CompactControlHeight);
+    }
+    quickCommandApplyLineEndingToChecks(map.value(QStringLiteral("lineEnding"), QStringLiteral("none")).toString(),
+                                        crCheck, lfCheck);
+    previewHeaderHl->addWidget(crCheck, 0, Qt::AlignVCenter);
+    previewHeaderHl->addWidget(lfCheck, 0, Qt::AlignVCenter);
+    vl->addWidget(previewHeader);
 
     auto *incomplete = new CaptionLabel(QString(), inner);
     incomplete->setObjectName(QStringLiteral("qcIncompleteHint"));
@@ -505,11 +671,13 @@ SimpleCardWidget *buildCommandRowWidget(const QVariantMap &map, bool isTemplate)
     return card;
 }
 
-class QuickCommandEditDialog : public QDialog
+/** 仅用于新建/编辑模板命令；换行后缀在卡片「发送预览」行的 CR/LF 上设置。 */
+class QuickCommandTemplateEditDialog : public QDialog
 {
   public:
-    QuickCommandEditDialog(QWidget *parent, const QString &title, bool templateMode, const QVariantMap &initial)
-        : QDialog(parent), m_templateMode(templateMode)
+    QuickCommandTemplateEditDialog(QWidget *parent, const QString &title, const QVariantMap &initial)
+        : QDialog(parent)
+        , m_lineEnding(initial.value(QStringLiteral("lineEnding"), QStringLiteral("none")).toString())
     {
         setWindowTitle(title);
         auto *layout = new QVBoxLayout(this);
@@ -526,71 +694,52 @@ class QuickCommandEditDialog : public QDialog
                                                                               : QStringLiteral("text"));
         m_modeCombo->setCurrentIndex(modeIdx >= 0 ? modeIdx : 0);
 
-        m_lineEndingCombo = new ComboBox(this);
-        m_lineEndingCombo->addItem(AppI18n::text("无换行"), QIcon(), QStringLiteral("none"));
-        m_lineEndingCombo->addItem(QStringLiteral("CR"), QIcon(), QStringLiteral("cr"));
-        m_lineEndingCombo->addItem(QStringLiteral("LF"), QIcon(), QStringLiteral("lf"));
-        m_lineEndingCombo->addItem(QStringLiteral("CRLF"), QIcon(), QStringLiteral("crlf"));
-        const QString le = initial.value(QStringLiteral("lineEnding"), QStringLiteral("none")).toString();
-        const int leIdx = m_lineEndingCombo->findData(le);
-        m_lineEndingCombo->setCurrentIndex(leIdx >= 0 ? leIdx : 0);
-
         m_enabledCheck = new CheckBox(AppI18n::text("启用"), this);
         m_enabledCheck->setChecked(initial.value(QStringLiteral("enabled"), true).toBool());
 
         form->addRow(AppI18n::text("名称"), m_nameEdit);
         form->addRow(AppI18n::text("模式"), m_modeCombo);
-        form->addRow(AppI18n::text("换行"), m_lineEndingCombo);
         form->addRow(QString(), m_enabledCheck);
-
         layout->addLayout(form);
 
-        if (m_templateMode) {
-            m_templateEdit = new PlainTextEdit(this);
-            m_templateEdit->setPlainText(initial.value(QStringLiteral("templateText")).toString());
-            m_templateEdit->setMinimumHeight(88);
-            layout->addWidget(new StrongBodyLabel(AppI18n::text("模板（使用 {{0}} {{1}} 占位）"), this));
-            layout->addWidget(m_templateEdit);
+        m_templateEdit = new PlainTextEdit(this);
+        m_templateEdit->setPlainText(initial.value(QStringLiteral("templateText")).toString());
+        m_templateEdit->setMinimumHeight(88);
+        layout->addWidget(new StrongBodyLabel(AppI18n::text("模板（使用 {{0}} {{1}} 占位）"), this));
+        layout->addWidget(m_templateEdit);
 
-            auto *paramHeader = new QWidget(this);
-            auto *paramRow = new QHBoxLayout(paramHeader);
-            paramRow->setContentsMargins(0, 0, 0, 0);
-            paramRow->addWidget(new StrongBodyLabel(AppI18n::text("参数"), paramHeader));
-            paramRow->addStretch(1);
-            auto *addParamBtn = new PushButton(AppI18n::text("添加参数"), paramHeader);
-            paramRow->addWidget(addParamBtn);
-            layout->addWidget(paramHeader);
+        auto *paramHeader = new QWidget(this);
+        auto *paramRow = new QHBoxLayout(paramHeader);
+        paramRow->setContentsMargins(0, 0, 0, 0);
+        paramRow->addWidget(new StrongBodyLabel(AppI18n::text("参数"), paramHeader));
+        paramRow->addStretch(1);
+        auto *addParamBtn = new PushButton(AppI18n::text("添加参数"), paramHeader);
+        paramRow->addWidget(addParamBtn);
+        layout->addWidget(paramHeader);
 
-            m_paramContainer = new QWidget(this);
-            m_paramLayout = new QVBoxLayout(m_paramContainer);
-            m_paramLayout->setContentsMargins(0, 0, 0, 0);
-            m_paramLayout->setSpacing(6);
-            layout->addWidget(m_paramContainer);
+        m_paramContainer = new QWidget(this);
+        m_paramLayout = new QVBoxLayout(m_paramContainer);
+        m_paramLayout->setContentsMargins(0, 0, 0, 0);
+        m_paramLayout->setSpacing(6);
+        layout->addWidget(m_paramContainer);
 
-            QJsonParseError pe1;
-            QJsonParseError pe2;
-            const QJsonDocument hd =
-                QJsonDocument::fromJson(initial.value(QStringLiteral("paramHintsJson")).toString().toUtf8(), &pe1);
-            const QJsonDocument dd =
-                QJsonDocument::fromJson(initial.value(QStringLiteral("paramDefaultsJson")).toString().toUtf8(), &pe2);
-            const QJsonArray hints = (pe1.error == QJsonParseError::NoError) ? hd.array() : QJsonArray();
-            const QJsonArray defaults = (pe2.error == QJsonParseError::NoError) ? dd.array() : QJsonArray();
-            const int n = qMax(hints.size(), defaults.size());
-            if (n == 0) {
-                addParamRow(QString(), QString());
-            } else {
-                for (int i = 0; i < n; ++i) {
-                    addParamRow(hints.at(i).toString(), i < defaults.size() ? defaults.at(i).toString() : QString());
-                }
-            }
-            connect(addParamBtn, &PushButton::clicked, this, [this]() { addParamRow(QString(), QString()); });
+        QJsonParseError pe1;
+        QJsonParseError pe2;
+        const QJsonDocument hd =
+            QJsonDocument::fromJson(initial.value(QStringLiteral("paramHintsJson")).toString().toUtf8(), &pe1);
+        const QJsonDocument dd =
+            QJsonDocument::fromJson(initial.value(QStringLiteral("paramDefaultsJson")).toString().toUtf8(), &pe2);
+        const QJsonArray hints = (pe1.error == QJsonParseError::NoError) ? hd.array() : QJsonArray();
+        const QJsonArray defaults = (pe2.error == QJsonParseError::NoError) ? dd.array() : QJsonArray();
+        const int n = qMax(hints.size(), defaults.size());
+        if (n == 0) {
+            addParamRow(QString(), QString());
         } else {
-            m_payloadEdit = new PlainTextEdit(this);
-            m_payloadEdit->setPlainText(initial.value(QStringLiteral("payload")).toString());
-            m_payloadEdit->setMinimumHeight(100);
-            layout->addWidget(new StrongBodyLabel(AppI18n::text("内容"), this));
-            layout->addWidget(m_payloadEdit);
+            for (int i = 0; i < n; ++i) {
+                addParamRow(hints.at(i).toString(), i < defaults.size() ? defaults.at(i).toString() : QString());
+            }
         }
+        connect(addParamBtn, &PushButton::clicked, this, [this]() { addParamRow(QString(), QString()); });
 
         auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
         connect(buttons, &QDialogButtonBox::accepted, this, &QDialog::accept);
@@ -603,23 +752,20 @@ class QuickCommandEditDialog : public QDialog
         QVariantMap m;
         m.insert(QStringLiteral("name"), m_nameEdit->text().trimmed());
         m.insert(QStringLiteral("mode"), m_modeCombo->currentData().toString());
-        m.insert(QStringLiteral("lineEnding"), m_lineEndingCombo->currentData().toString());
+        m.insert(QStringLiteral("lineEnding"), m_lineEnding);
         m.insert(QStringLiteral("enabled"), m_enabledCheck->isChecked());
-        if (m_templateMode) {
-            m.insert(QStringLiteral("templateText"), m_templateEdit->toPlainText());
-            QJsonArray hints;
-            QJsonArray defaults;
-            for (const ParamRow &row : m_paramRows) {
-                hints.append(row.hint->text());
-                defaults.append(row.defaultValue->text());
-            }
-            m.insert(QStringLiteral("paramHintsJson"),
-                     QString::fromUtf8(QJsonDocument(hints).toJson(QJsonDocument::Compact)));
-            m.insert(QStringLiteral("paramDefaultsJson"),
-                     QString::fromUtf8(QJsonDocument(defaults).toJson(QJsonDocument::Compact)));
-        } else {
-            m.insert(QStringLiteral("payload"), m_payloadEdit->toPlainText());
+        m.insert(QStringLiteral("templateText"), m_templateEdit->toPlainText());
+        QJsonArray hints;
+        QJsonArray defaults;
+        for (const ParamRow &row : m_paramRows) {
+            hints.append(row.hint->text());
+            defaults.append(row.defaultValue->text());
         }
+        m.insert(QStringLiteral("paramHintsJson"),
+                 QString::fromUtf8(QJsonDocument(hints).toJson(QJsonDocument::Compact)));
+        m.insert(QStringLiteral("paramDefaultsJson"),
+                 QString::fromUtf8(QJsonDocument(defaults).toJson(QJsonDocument::Compact)));
+        m.insert(QStringLiteral("template"), true);
         return m;
     }
 
@@ -664,20 +810,17 @@ class QuickCommandEditDialog : public QDialog
         removeBtn->setFixedSize(CompactControlHeight, CompactControlHeight);
         removeBtn->setIconSize(QSize(16, 16));
         AppUi::setFluentToolTip(removeBtn, AppI18n::text("删除"), ToolTipPosition::Top);
-        removeBtn->setAccessibleName(AppI18n::text("删除"));
         hl->addWidget(removeBtn, 0, Qt::AlignVCenter);
         connect(removeBtn, &TransparentToolButton::clicked, this, [this, row]() { removeParamRow(row); });
         m_paramLayout->addWidget(row);
         m_paramRows.append(ParamRow{row, h, v});
     }
 
-    bool m_templateMode = false;
+    QString m_lineEnding;
     LineEdit *m_nameEdit = nullptr;
     ComboBox *m_modeCombo = nullptr;
-    ComboBox *m_lineEndingCombo = nullptr;
     CheckBox *m_enabledCheck = nullptr;
     PlainTextEdit *m_templateEdit = nullptr;
-    PlainTextEdit *m_payloadEdit = nullptr;
     QWidget *m_paramContainer = nullptr;
     QVBoxLayout *m_paramLayout = nullptr;
     QList<ParamRow> m_paramRows;
@@ -825,7 +968,7 @@ void WorkbenchPage::applyQuickCommandRowPreview(QWidget *rowWidget)
     if (!inner) {
         return;
     }
-    const QVariantMap map = rowWidget->property(PropCommandData).toMap();
+    const QVariantMap map = quickCommandMapFromInner(inner, rowWidget->property(PropCommandData).toMap());
     setQuickCommandRowPreview(inner, map);
 }
 
@@ -988,6 +1131,11 @@ void WorkbenchPage::wireQuickCommandsFolderReorderButtons(ExpandSettingCard *fol
     hl->addWidget(expandBtn, 0, Qt::AlignVCenter);
     actionHL->addWidget(group, 0, Qt::AlignRight | Qt::AlignVCenter);
     actionHL->addSpacing(8);
+
+    if (!hdr->property("qcFolderHeaderSelectFilter").toBool()) {
+        hdr->setProperty("qcFolderHeaderSelectFilter", true);
+        hdr->installEventFilter(this);
+    }
 }
 
 void WorkbenchPage::quickCommandsHandleListClick(QWidget *widget)
@@ -1089,19 +1237,84 @@ SimpleCardWidget *WorkbenchPage::insertQuickCommandRow(QVBoxLayout *targetLay, i
 
     QWidget *inner = cmdRow->findChild<QWidget *>(QStringLiteral("qcCommandInner"));
     if (inner) {
-        for (LineEdit *e : inner->findChildren<LineEdit *>()) {
-            if (!e->property("qcParamIndex").isValid()) {
-                continue;
+        const auto persistRow = [this, cmdRow, parentFolder, inner]() {
+            const QVariantMap live =
+                quickCommandMapFromInner(inner, cmdRow->property(PropCommandData).toMap());
+            cmdRow->setProperty(PropCommandData, live);
+            updateQuickCommandTemplateMetaLabel(inner, live);
+            syncQuickCommandsDataFromList();
+            saveQuickCommands();
+            if (parentFolder) {
+                updateFolderCardSubtitle(parentFolder);
             }
-            connect(e, &QLineEdit::textChanged, this, [this, cmdRow, parentFolder]() {
-                refreshQuickCommandRowPreview(cmdRow);
-                syncQuickCommandsDataFromList();
-                saveQuickCommands();
-                if (parentFolder) {
-                    updateFolderCardSubtitle(parentFolder);
+        };
+        const auto refreshPreview = [this, cmdRow]() { refreshQuickCommandRowPreview(cmdRow); };
+
+        if (QToolButton *confirmBtn = inner->findChild<QToolButton *>(QStringLiteral("qcNameConfirmBtn"))) {
+            connect(confirmBtn, &QToolButton::clicked, this, [this, cmdRow, inner, persistRow]() {
+                LineEdit *nameEdit = inner->findChild<LineEdit *>(QStringLiteral("qcNameEdit"));
+                if (!nameEdit) {
+                    return;
                 }
+                const QString name = nameEdit->text().trimmed();
+                if (name.isEmpty()) {
+                    showWarning(AppI18n::text("无法保存"), AppI18n::text("名称不能为空"));
+                    return;
+                }
+                QVariantMap m = cmdRow->property(PropCommandData).toMap();
+                m.insert(QStringLiteral("name"), name);
+                cmdRow->setProperty(PropCommandData, m);
+                updateFixedCommandTitleLabel(inner, name);
+                setFixedCommandTitleEditMode(inner, false);
+                persistRow();
             });
         }
+        if (LineEdit *payloadEdit = inner->findChild<LineEdit *>(QStringLiteral("qcPayloadEdit"))) {
+            connect(payloadEdit, &LineEdit::textChanged, this, [refreshPreview, persistRow]() {
+                refreshPreview();
+                persistRow();
+            });
+        }
+        if (CheckBox *cr = inner->findChild<CheckBox *>(QStringLiteral("qcSuffixCrCheck"))) {
+            if (CheckBox *lf = inner->findChild<CheckBox *>(QStringLiteral("qcSuffixLfCheck"))) {
+                connect(cr, &CheckBox::toggled, this, [refreshPreview, persistRow](bool) {
+                    refreshPreview();
+                    persistRow();
+                });
+                connect(lf, &CheckBox::toggled, this, [refreshPreview, persistRow](bool) {
+                    refreshPreview();
+                    persistRow();
+                });
+            }
+        }
+        if (QToolButton *modeBtn = inner->findChild<QToolButton *>(QStringLiteral("qcModeButton"))) {
+            connect(modeBtn, &QToolButton::clicked, this, [this, cmdRow, modeBtn, refreshPreview, persistRow]() {
+                QVariantMap m = cmdRow->property(PropCommandData).toMap();
+                const QString cur = m.value(QStringLiteral("mode"), QStringLiteral("text")).toString();
+                const QString next = cur == QStringLiteral("hex") ? QStringLiteral("text") : QStringLiteral("hex");
+                m.insert(QStringLiteral("mode"), next);
+                cmdRow->setProperty(PropCommandData, m);
+                updateQuickCommandModeButton(static_cast<TransparentToolButton *>(modeBtn), next);
+                refreshPreview();
+                persistRow();
+            });
+        }
+        const auto wireParamEdits = [this, inner, refreshPreview, persistRow]() {
+            for (LineEdit *e : inner->findChildren<LineEdit *>()) {
+                if (!e->property("qcParamIndex").isValid()) {
+                    continue;
+                }
+                if (e->property("qcParamWired").toBool()) {
+                    continue;
+                }
+                e->setProperty("qcParamWired", true);
+                connect(e, &LineEdit::textChanged, this, [refreshPreview, persistRow]() {
+                    refreshPreview();
+                    persistRow();
+                });
+            }
+        };
+        wireParamEdits();
     }
     if (parentFolder) {
         updateFolderCardSubtitle(parentFolder);
@@ -1299,7 +1512,8 @@ QJsonObject WorkbenchPage::quickCommandsCommandRowToJson(QWidget *rowWidget) con
     if (!rowWidget || !rowWidget->property(PropCommandCard).toBool()) {
         return QJsonObject();
     }
-    QVariantMap m = rowWidget->property(PropCommandData).toMap();
+    QWidget *inner = rowWidget->findChild<QWidget *>(QStringLiteral("qcCommandInner"));
+    QVariantMap m = quickCommandMapFromInner(inner, rowWidget->property(PropCommandData).toMap());
     const bool isTemplate = m.value(QStringLiteral("template")).toBool();
     QStringList hints;
     QStringList defaults;
@@ -1494,7 +1708,8 @@ void WorkbenchPage::sendQuickCommandRow(QWidget *rowWidget)
         showWarning(AppI18n::text("无法发送"), AppI18n::text("请先连接串口"));
         return;
     }
-    QVariantMap m = rowWidget->property(PropCommandData).toMap();
+    QWidget *inner = rowWidget->findChild<QWidget *>(QStringLiteral("qcCommandInner"));
+    QVariantMap m = quickCommandMapFromInner(inner, rowWidget->property(PropCommandData).toMap());
     if (!m.value(QStringLiteral("enabled"), true).toBool()) {
         showWarning(AppI18n::text("无法发送"), AppI18n::text("该命令已停用"));
         return;
@@ -1504,7 +1719,6 @@ void WorkbenchPage::sendQuickCommandRow(QWidget *rowWidget)
     QString payload;
     if (m.value(QStringLiteral("template")).toBool()) {
         QString err;
-        QWidget *inner = rowWidget->findChild<QWidget *>(QStringLiteral("qcCommandInner"));
         payload = applyTemplatePlaceholders(m.value(QStringLiteral("templateText")).toString(),
                                             quickCommandParamTextsFromRow(inner), &err);
         if (err == QStringLiteral("missing_param") || err == QStringLiteral("unresolved")) {
@@ -1569,27 +1783,28 @@ void WorkbenchPage::addQuickCommandsFixedCommand()
         showWarning(AppI18n::text("无法添加"), AppI18n::text("常用命令数量已达上限"));
         return;
     }
-    QVariantMap initial;
-    initial.insert(QStringLiteral("name"), AppI18n::text("新命令"));
-    initial.insert(QStringLiteral("mode"), QStringLiteral("text"));
-    initial.insert(QStringLiteral("lineEnding"), QStringLiteral("none"));
-    initial.insert(QStringLiteral("enabled"), true);
-    QuickCommandEditDialog dlg(window(), AppI18n::text("添加固定命令"), false, initial);
-    if (dlg.exec() != QDialog::Accepted) {
-        return;
-    }
-    QVariantMap m = dlg.result();
-    if (m.value(QStringLiteral("name")).toString().trimmed().isEmpty()) {
-        showWarning(AppI18n::text("无法添加"), AppI18n::text("名称不能为空"));
-        return;
-    }
+    QVariantMap m;
+    m.insert(QStringLiteral("name"), QString());
+    m.insert(QStringLiteral("payload"), QString());
+    m.insert(QStringLiteral("mode"), QStringLiteral("text"));
+    m.insert(QStringLiteral("lineEnding"), QStringLiteral("none"));
+    m.insert(QStringLiteral("enabled"), true);
     m.insert(QStringLiteral("template"), false);
 
     QVBoxLayout *targetLay = quickCommandsTargetLayoutForAdd();
     if (!targetLay) {
         return;
     }
-    insertQuickCommandRow(targetLay, targetLay->count(), m, false);
+    SimpleCardWidget *cmdRow = insertQuickCommandRow(targetLay, targetLay->count(), m, false);
+    if (cmdRow) {
+        if (QWidget *inner = cmdRow->findChild<QWidget *>(QStringLiteral("qcCommandInner"))) {
+            if (LineEdit *nameEdit = inner->findChild<LineEdit *>(QStringLiteral("qcNameEdit"))) {
+                QTimer::singleShot(0, nameEdit, [nameEdit]() {
+                    nameEdit->setFocus(Qt::OtherFocusReason);
+                });
+            }
+        }
+    }
     syncQuickCommandsDataFromList();
     saveQuickCommands();
 }
@@ -1616,7 +1831,7 @@ void WorkbenchPage::addQuickCommandsTemplateCommand()
     initial.insert(QStringLiteral("paramHintsJson"), QString::fromUtf8(QJsonDocument(h).toJson(QJsonDocument::Compact)));
     initial.insert(QStringLiteral("paramDefaultsJson"), QString::fromUtf8(QJsonDocument(d).toJson(QJsonDocument::Compact)));
 
-    QuickCommandEditDialog dlg(window(), AppI18n::text("添加模板命令"), true, initial);
+    QuickCommandTemplateEditDialog dlg(window(), AppI18n::text("添加模板命令"), initial);
     if (dlg.exec() != QDialog::Accepted) {
         return;
     }
@@ -1625,7 +1840,6 @@ void WorkbenchPage::addQuickCommandsTemplateCommand()
         showWarning(AppI18n::text("无法添加"), AppI18n::text("名称不能为空"));
         return;
     }
-    m.insert(QStringLiteral("template"), true);
 
     QVBoxLayout *targetLay = quickCommandsTargetLayoutForAdd();
     if (!targetLay) {
@@ -1719,45 +1933,66 @@ void WorkbenchPage::editQuickCommandsSelection()
         return;
     }
     QWidget *rowOuter = cmdRow->parentWidget();
-    if (!rowOuter || !rowOuter->parentWidget()) {
-        return;
-    }
-    QVBoxLayout *targetLay = qobject_cast<QVBoxLayout *>(rowOuter->parentWidget()->layout());
-    if (!targetLay) {
-        return;
-    }
-    const int rowIndex = targetLay->indexOf(rowOuter);
-    if (rowIndex < 0) {
-        return;
-    }
-
     QVariantMap m = cmdRow->property(PropCommandData).toMap();
     const bool isTemplate = m.value(QStringLiteral("template")).toBool();
-    QuickCommandEditDialog dlg(window(), AppI18n::text("编辑命令"), isTemplate, m);
-    if (dlg.exec() != QDialog::Accepted) {
+
+    if (isTemplate) {
+        if (!rowOuter || !rowOuter->parentWidget()) {
+            return;
+        }
+        QVBoxLayout *targetLay = qobject_cast<QVBoxLayout *>(rowOuter->parentWidget()->layout());
+        if (!targetLay) {
+            return;
+        }
+        const int rowIndex = targetLay->indexOf(rowOuter);
+        if (rowIndex < 0) {
+            return;
+        }
+        QWidget *inner = cmdRow->findChild<QWidget *>(QStringLiteral("qcCommandInner"));
+        if (inner) {
+            m = quickCommandMapFromInner(inner, m);
+        }
+        QuickCommandTemplateEditDialog dlg(window(), AppI18n::text("编辑模板命令"), m);
+        if (dlg.exec() != QDialog::Accepted) {
+            return;
+        }
+        m = dlg.result();
+        ExpandSettingCard *folderForSubtitle = nullptr;
+        for (QWidget *p = rowOuter->parentWidget(); p; p = p->parentWidget()) {
+            if (auto *esc = qobject_cast<ExpandSettingCard *>(p)) {
+                if (esc->property(PropFolderCard).toBool()) {
+                    folderForSubtitle = esc;
+                }
+                break;
+            }
+        }
+        targetLay->removeWidget(rowOuter);
+        rowOuter->deleteLater();
+        insertQuickCommandRow(targetLay, rowIndex, m, true);
+        syncQuickCommandsDataFromList();
+        saveQuickCommands();
+        updateQuickCommandsSelectionHighlight();
+        if (folderForSubtitle) {
+            updateFolderCardSubtitle(folderForSubtitle);
+        }
         return;
     }
-    m = dlg.result();
-    m.insert(QStringLiteral("template"), isTemplate);
 
-    ExpandSettingCard *folderForSubtitle = nullptr;
-    for (QWidget *p = rowOuter->parentWidget(); p; p = p->parentWidget()) {
-        if (auto *esc = qobject_cast<ExpandSettingCard *>(p)) {
-            if (esc->property(PropFolderCard).toBool()) {
-                folderForSubtitle = esc;
-            }
-            break;
+    if (QWidget *inner = cmdRow->findChild<QWidget *>(QStringLiteral("qcCommandInner"))) {
+        if (!inner->findChild<QWidget *>(QStringLiteral("qcNameConfirmBtn"))) {
+            return;
         }
-    }
-
-    targetLay->removeWidget(rowOuter);
-    rowOuter->deleteLater();
-    insertQuickCommandRow(targetLay, rowIndex, m, isTemplate);
-    syncQuickCommandsDataFromList();
-    saveQuickCommands();
-    updateQuickCommandsSelectionHighlight();
-    if (folderForSubtitle) {
-        updateFolderCardSubtitle(folderForSubtitle);
+        QVariantMap m = cmdRow->property(PropCommandData).toMap();
+        if (LineEdit *nameEdit = inner->findChild<LineEdit *>(QStringLiteral("qcNameEdit"))) {
+            nameEdit->setText(commandNameMap(m));
+        }
+        setFixedCommandTitleEditMode(inner, true);
+        if (LineEdit *nameEdit = inner->findChild<LineEdit *>(QStringLiteral("qcNameEdit"))) {
+            QTimer::singleShot(0, nameEdit, [nameEdit]() {
+                nameEdit->setFocus(Qt::OtherFocusReason);
+                nameEdit->selectAll();
+            });
+        }
     }
 }
 
