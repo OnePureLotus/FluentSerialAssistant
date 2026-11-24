@@ -331,8 +331,8 @@ class WorkbenchPage : public AppPage, public AppControl::SessionControl
                                              int *trailingBytes = nullptr);
     void calculateChecksumForCurrentPayload();
     void setChecksumResultText(const QString &text);
-    AppModbus::RequestConfig currentModbusConfig(quint8 slaveOverride = 0xFF) const;
-    QByteArray currentModbusFrame(bool *ok = nullptr, quint8 slaveOverride = 0xFF, bool allowNonStandardSlaveId = false);
+    AppModbus::RequestConfig currentModbusConfig(int slaveOverride = -1) const;
+    QByteArray currentModbusFrame(bool *ok = nullptr, int slaveOverride = -1, bool allowNonStandardSlaveId = false);
     void fillModbusRequest();
     void sendModbusRequest();
     void sendModbusFrame(const QByteArray &frame, const QString &statusText);

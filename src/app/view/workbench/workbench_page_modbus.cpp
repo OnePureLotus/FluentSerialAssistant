@@ -114,13 +114,13 @@ QWidget *WorkbenchPage::createModbusSection()
     return section;
 }
 
-AppModbus::RequestConfig WorkbenchPage::currentModbusConfig(quint8 slaveOverride) const
+AppModbus::RequestConfig WorkbenchPage::currentModbusConfig(int slaveOverride) const
 {
     AppModbus::RequestConfig config;
-    if (slaveOverride == 0xFF) {
+    if (slaveOverride < 0) {
         config.slaveId = static_cast<quint8>(numberEditValue(m_modbusSlaveEdit, 1, 1, 247));
     } else {
-        config.slaveId = slaveOverride;
+        config.slaveId = static_cast<quint8>(qBound(0, slaveOverride, 255));
     }
     config.functionKey =
         m_modbusFunctionCombo ? m_modbusFunctionCombo->currentData().toString() : AppModbus::defaultFunctionKey();
@@ -132,7 +132,7 @@ AppModbus::RequestConfig WorkbenchPage::currentModbusConfig(quint8 slaveOverride
     return config;
 }
 
-QByteArray WorkbenchPage::currentModbusFrame(bool *ok, quint8 slaveOverride, bool allowNonStandardSlaveId)
+QByteArray WorkbenchPage::currentModbusFrame(bool *ok, int slaveOverride, bool allowNonStandardSlaveId)
 {
     if (ok) {
         *ok = false;
@@ -273,7 +273,7 @@ void WorkbenchPage::sendModbusProbeStep()
         return;
     }
 
-    const quint8 slave = static_cast<quint8>(m_modbusProbeNextSlave);
+    const int slave = m_modbusProbeNextSlave;
     AppModbus::RequestConfig config = currentModbusConfig(slave);
     config.allowNonStandardSlaveId = true;
     const AppModbus::BuildResult result = AppModbus::buildRequest(config);
