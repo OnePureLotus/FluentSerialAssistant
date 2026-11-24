@@ -242,7 +242,11 @@ BuildResult buildRequest(const RequestConfig &config)
 {
     const FunctionOption function = functionForKey(config.functionKey);
     const quint16 quantity = function.write && !function.multiple ? 1 : config.quantity;
-    if (config.slaveId == 0 || config.slaveId > 247) {
+    if (config.allowNonStandardSlaveId) {
+        if (config.slaveId > 255) {
+            return fail(AppI18n::text("站号超出范围"));
+        }
+    } else if (config.slaveId == 0 || config.slaveId > 247) {
         return fail(AppI18n::text("站号范围应为 1-247"));
     }
     const quint16 maximum = maximumQuantity(function);

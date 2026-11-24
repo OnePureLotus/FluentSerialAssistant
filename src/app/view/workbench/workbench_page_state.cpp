@@ -44,6 +44,9 @@ void WorkbenchPage::setupSerialSignals()
             updateFileSendUi(false);
             updateFileProgress();
         }
+        if (m_modbusProbeActive) {
+            stopModbusProbe();
+        }
         m_statsTimer.stop();
         closeAutoLog();
         closeReceiveCapture();
@@ -154,6 +157,9 @@ void WorkbenchPage::restoreSettings()
     const int modbusAddress = settings.value(QStringLiteral("modbus/address"), 0).toInt();
     const int modbusQuantity = settings.value(QStringLiteral("modbus/quantity"), 1).toInt();
     const QString modbusValues = settings.value(QStringLiteral("modbus/values")).toString();
+    const bool modbusProbeEnabled = settings.value(QStringLiteral("modbus/probeEnabled"), false).toBool();
+    const int modbusProbeIntervalMs =
+        settings.value(QStringLiteral("modbus/probeIntervalMs"), DefaultModbusProbeIntervalMs).toInt();
     const int macroLoopCount = settings.value(QStringLiteral("macro/loopCount"), 1).toInt();
     const bool macroAbortOnFailure = settings.value(QStringLiteral("macro/abortOnFailure"), true).toBool();
     const QString scriptText = settings.value(QStringLiteral("script/current")).toString();
@@ -254,6 +260,13 @@ void WorkbenchPage::restoreSettings()
     setNumberEditValue(m_modbusAddressEdit, modbusAddress, 0, 65535);
     setNumberEditValue(m_modbusQuantityEdit, modbusQuantity, 1, 2000);
     m_modbusValuesEdit->setPlainText(modbusValues);
+    if (m_modbusProbeCheck) {
+        m_modbusProbeCheck->setChecked(modbusProbeEnabled);
+    }
+    if (m_modbusProbeIntervalEdit) {
+        setNumberEditValue(m_modbusProbeIntervalEdit, modbusProbeIntervalMs, 1, 60000);
+    }
+    refreshModbusProbeIntervalVisibility();
     updateModbusUi();
     setNumberEditValue(m_macroLoopCountEdit, macroLoopCount, 1, 100000);
     m_macroAbortOnFailureCheck->setChecked(macroAbortOnFailure);
@@ -334,6 +347,9 @@ void WorkbenchPage::saveSettings() const
     settings.setValue(QStringLiteral("modbus/address"), numberEditValue(m_modbusAddressEdit, 0, 0, 65535));
     settings.setValue(QStringLiteral("modbus/quantity"), numberEditValue(m_modbusQuantityEdit, 1, 1, 2000));
     settings.setValue(QStringLiteral("modbus/values"), m_modbusValuesEdit->toPlainText());
+    settings.setValue(QStringLiteral("modbus/probeEnabled"), m_modbusProbeCheck && m_modbusProbeCheck->isChecked());
+    settings.setValue(QStringLiteral("modbus/probeIntervalMs"),
+                      numberEditValue(m_modbusProbeIntervalEdit, DefaultModbusProbeIntervalMs, 1, 60000));
     settings.setValue(QStringLiteral("macro/loopCount"), numberEditValue(m_macroLoopCountEdit, 1, 1, 100000));
     settings.setValue(QStringLiteral("macro/abortOnFailure"), m_macroAbortOnFailureCheck->isChecked());
     saveProtocolTemplates();
@@ -481,6 +497,15 @@ void WorkbenchPage::copySessionConfigFrom(const WorkbenchPage &source)
     setNumberEditValue(m_modbusAddressEdit, numberEditValue(source.m_modbusAddressEdit, 0, 0, 65535), 0, 65535);
     setNumberEditValue(m_modbusQuantityEdit, numberEditValue(source.m_modbusQuantityEdit, 1, 1, 2000), 1, 2000);
     m_modbusValuesEdit->setPlainText(source.m_modbusValuesEdit->toPlainText());
+    if (m_modbusProbeCheck && source.m_modbusProbeCheck) {
+        m_modbusProbeCheck->setChecked(source.m_modbusProbeCheck->isChecked());
+    }
+    if (m_modbusProbeIntervalEdit && source.m_modbusProbeIntervalEdit) {
+        setNumberEditValue(m_modbusProbeIntervalEdit,
+                           numberEditValue(source.m_modbusProbeIntervalEdit, DefaultModbusProbeIntervalMs, 1, 60000),
+                           1, 60000);
+    }
+    refreshModbusProbeIntervalVisibility();
     updateModbusUi();
 
     m_macroSteps = source.m_macroSteps;

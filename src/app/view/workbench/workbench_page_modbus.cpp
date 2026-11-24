@@ -1,4 +1,5 @@
 #include "app/core/app_i18n.h"
+#include "app/core/app_settings.h"
 #include "app/view/muted_text.h"
 #include "app/view/workbench/workbench_page_internal.h"
 
@@ -12,6 +13,25 @@ QWidget *WorkbenchPage::createModbusSection()
 
     m_modbusSlaveEdit = createNumberEdit(section, 1, 1, 247);
     addFormRow(root, AppI18n::text("站号"), m_modbusSlaveEdit);
+
+    m_modbusProbeCheck = new CheckBox(AppI18n::text("站号探测"), section);
+    m_modbusProbeCheck->setToolTip(AppI18n::text("勾选后发送将依次向站号 0–255 发出当前读/写命令；站号 0 为广播，248–255 非标准 Modbus，请根据终端日志自行判断回复。"));
+    root->addWidget(m_modbusProbeCheck);
+
+    m_modbusProbeIntervalRow = new QWidget(section);
+    auto *intervalRowLayout = new QHBoxLayout(m_modbusProbeIntervalRow);
+    intervalRowLayout->setContentsMargins(0, 0, 0, 0);
+    intervalRowLayout->setSpacing(8);
+    auto *intervalLabel = new BodyLabel(AppI18n::text("探测间隔"), m_modbusProbeIntervalRow);
+    setFixedControlWidth(intervalLabel, FormLabelWidth);
+    intervalRowLayout->addWidget(intervalLabel, 0, Qt::AlignVCenter);
+    m_modbusProbeIntervalEdit = createNumberEdit(m_modbusProbeIntervalRow, DefaultModbusProbeIntervalMs, 1, 60000);
+    m_modbusProbeIntervalEdit->setMinimumWidth(0);
+    m_modbusProbeIntervalEdit->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+    intervalRowLayout->addWidget(m_modbusProbeIntervalEdit, 1, Qt::AlignVCenter);
+    intervalRowLayout->addWidget(unitLabel(QStringLiteral("ms"), m_modbusProbeIntervalRow), 0, Qt::AlignVCenter);
+    root->addWidget(m_modbusProbeIntervalRow);
+    m_modbusProbeIntervalRow->hide();
 
     m_modbusFunctionCombo = new ComboBox(section);
     addModbusFunctionOptions(m_modbusFunctionCombo);
@@ -72,18 +92,36 @@ QWidget *WorkbenchPage::createModbusSection()
         AppSettings settings;
         settings.setValue(QStringLiteral("modbus/values"), m_modbusValuesEdit->toPlainText());
     });
+    connect(m_modbusProbeCheck, &CheckBox::toggled, this, [this](bool checked) {
+        if (m_modbusProbeActive && !checked) {
+            stopModbusProbe();
+        }
+        refreshModbusProbeIntervalVisibility();
+        AppSettings settings;
+        settings.setValue(QStringLiteral("modbus/probeEnabled"), checked);
+    });
+    connect(m_modbusProbeIntervalEdit, &LineEdit::textChanged, this, [this](const QString &) {
+        AppSettings settings;
+        settings.setValue(QStringLiteral("modbus/probeIntervalMs"),
+                         numberEditValue(m_modbusProbeIntervalEdit, DefaultModbusProbeIntervalMs, 1, 60000));
+    });
     connect(m_modbusFillButton, &PushButton::clicked, this, &WorkbenchPage::fillModbusRequest);
     connect(m_modbusSendButton, &PrimaryPushButton::clicked, this, &WorkbenchPage::sendModbusRequest);
 
     updateModbusUi();
+    refreshModbusProbeIntervalVisibility();
     makeCollapsibleCard(section, QStringLiteral("modbus"));
     return section;
 }
 
-AppModbus::RequestConfig WorkbenchPage::currentModbusConfig() const
+AppModbus::RequestConfig WorkbenchPage::currentModbusConfig(quint8 slaveOverride) const
 {
     AppModbus::RequestConfig config;
-    config.slaveId = static_cast<quint8>(numberEditValue(m_modbusSlaveEdit, 1, 1, 247));
+    if (slaveOverride == 0xFF) {
+        config.slaveId = static_cast<quint8>(numberEditValue(m_modbusSlaveEdit, 1, 1, 247));
+    } else {
+        config.slaveId = slaveOverride;
+    }
     config.functionKey =
         m_modbusFunctionCombo ? m_modbusFunctionCombo->currentData().toString() : AppModbus::defaultFunctionKey();
     const AppModbus::FunctionOption function = AppModbus::functionForKey(config.functionKey);
@@ -94,13 +132,15 @@ AppModbus::RequestConfig WorkbenchPage::currentModbusConfig() const
     return config;
 }
 
-QByteArray WorkbenchPage::currentModbusFrame(bool *ok)
+QByteArray WorkbenchPage::currentModbusFrame(bool *ok, quint8 slaveOverride, bool allowNonStandardSlaveId)
 {
     if (ok) {
         *ok = false;
     }
 
-    const AppModbus::BuildResult result = AppModbus::buildRequest(currentModbusConfig());
+    AppModbus::RequestConfig config = currentModbusConfig(slaveOverride);
+    config.allowNonStandardSlaveId = allowNonStandardSlaveId;
+    const AppModbus::BuildResult result = AppModbus::buildRequest(config);
     if (!result.ok) {
         setModbusStatusText(result.errorMessage);
         showWarning(AppI18n::text("Modbus 帧生成失败"), result.errorMessage);
@@ -133,8 +173,146 @@ void WorkbenchPage::fillModbusRequest()
     setModbusStatusText(AppI18n::text("已填入发送区 · %1").arg(bytesToHex(frame)));
 }
 
+void WorkbenchPage::sendModbusFrame(const QByteArray &frame, const QString &statusText)
+{
+    QString error;
+    if (!m_serial.writeData(frame, &error)) {
+        showError(AppI18n::text("Modbus 发送失败"), error);
+        stopModbusProbe();
+        return;
+    }
+
+    SendHistoryItem historyItem;
+    historyItem.mode = QStringLiteral("hex");
+    historyItem.payload = bytesToHex(frame);
+    historyItem.lineEnding = QStringLiteral("none");
+    addSendHistory(historyItem);
+    appendRecord(RecordDirection::Tx, frame, true, QString(), false, true);
+    setModbusStatusText(statusText);
+}
+
+void WorkbenchPage::refreshModbusProbeIntervalVisibility()
+{
+    if (m_modbusProbeIntervalRow) {
+        m_modbusProbeIntervalRow->setVisible(m_modbusProbeCheck && m_modbusProbeCheck->isChecked());
+    }
+}
+
+void WorkbenchPage::updateModbusProbeUi(bool probing)
+{
+    const bool editable = !probing;
+    if (m_modbusSlaveEdit) {
+        m_modbusSlaveEdit->setEnabled(editable);
+    }
+    if (m_modbusProbeIntervalEdit) {
+        m_modbusProbeIntervalEdit->setEnabled(editable);
+    }
+    if (m_modbusFunctionCombo) {
+        m_modbusFunctionCombo->setEnabled(editable);
+    }
+    if (m_modbusAddressEdit) {
+        m_modbusAddressEdit->setEnabled(editable);
+    }
+    updateModbusUi();
+    if (m_modbusFillButton) {
+        m_modbusFillButton->setEnabled(editable);
+    }
+    if (m_modbusSendButton) {
+        m_modbusSendButton->setText(probing ? AppI18n::text("停止探测") : AppI18n::text("发送"));
+    }
+}
+
+void WorkbenchPage::stopModbusProbe(const QString &message)
+{
+    if (!m_modbusProbeActive) {
+        return;
+    }
+    m_modbusProbeTimer.stop();
+    m_modbusProbeActive = false;
+    m_modbusProbeNextSlave = 0;
+    updateModbusProbeUi(false);
+    if (!message.isEmpty()) {
+        setModbusStatusText(message);
+    }
+}
+
+void WorkbenchPage::startModbusProbe()
+{
+    if (!m_serial.isOpen()) {
+        showWarning(AppI18n::text("无法发送 Modbus 请求"), AppI18n::text("请先连接串口"));
+        return;
+    }
+
+    AppModbus::RequestConfig precheck = currentModbusConfig(1);
+    precheck.allowNonStandardSlaveId = false;
+    const AppModbus::BuildResult pre = AppModbus::buildRequest(precheck);
+    if (!pre.ok) {
+        showWarning(AppI18n::text("Modbus 帧生成失败"), pre.errorMessage);
+        return;
+    }
+
+    m_modbusProbeNextSlave = 0;
+    m_modbusProbeActive = true;
+    updateModbusProbeUi(true);
+    sendModbusProbeStep();
+}
+
+void WorkbenchPage::sendModbusProbeStep()
+{
+    if (!m_modbusProbeActive) {
+        return;
+    }
+    if (!m_serial.isOpen()) {
+        stopModbusProbe();
+        showWarning(AppI18n::text("Modbus 探测中止"), AppI18n::text("串口已断开"));
+        return;
+    }
+
+    if (m_modbusProbeNextSlave > 255) {
+        stopModbusProbe(AppI18n::text("站号探测已完成（0–255）"));
+        return;
+    }
+
+    const quint8 slave = static_cast<quint8>(m_modbusProbeNextSlave);
+    AppModbus::RequestConfig config = currentModbusConfig(slave);
+    config.allowNonStandardSlaveId = true;
+    const AppModbus::BuildResult result = AppModbus::buildRequest(config);
+    if (!result.ok) {
+        stopModbusProbe();
+        showWarning(AppI18n::text("Modbus 探测中止"), result.errorMessage);
+        return;
+    }
+
+    const QString status =
+        AppI18n::text("探测发送 · 站号 %1/255 · %2").arg(slave).arg(bytesToHex(result.frame));
+    sendModbusFrame(result.frame, status);
+    if (!m_modbusProbeActive) {
+        return;
+    }
+
+    ++m_modbusProbeNextSlave;
+    if (m_modbusProbeNextSlave > 255) {
+        stopModbusProbe(AppI18n::text("站号探测已完成（0–255）"));
+        return;
+    }
+
+    const int intervalMs =
+        numberEditValue(m_modbusProbeIntervalEdit, DefaultModbusProbeIntervalMs, 1, 60000);
+    m_modbusProbeTimer.start(intervalMs);
+}
+
 void WorkbenchPage::sendModbusRequest()
 {
+    if (m_modbusProbeActive) {
+        stopModbusProbe(AppI18n::text("站号探测已停止"));
+        return;
+    }
+
+    if (m_modbusProbeCheck && m_modbusProbeCheck->isChecked()) {
+        startModbusProbe();
+        return;
+    }
+
     if (!m_serial.isOpen()) {
         showWarning(AppI18n::text("无法发送 Modbus 请求"), AppI18n::text("请先连接串口"));
         return;
@@ -146,19 +324,7 @@ void WorkbenchPage::sendModbusRequest()
         return;
     }
 
-    QString error;
-    if (!m_serial.writeData(frame, &error)) {
-        showError(AppI18n::text("Modbus 发送失败"), error);
-        return;
-    }
-
-    SendHistoryItem historyItem;
-    historyItem.mode = QStringLiteral("hex");
-    historyItem.payload = bytesToHex(frame);
-    historyItem.lineEnding = QStringLiteral("none");
-    addSendHistory(historyItem);
-    appendRecord(RecordDirection::Tx, frame, true, QString(), false, true);
-    setModbusStatusText(AppI18n::text("已发送 · %1").arg(bytesToHex(frame)));
+    sendModbusFrame(frame, AppI18n::text("已发送 · %1").arg(bytesToHex(frame)));
 }
 
 void WorkbenchPage::updateModbusUi()
@@ -173,7 +339,7 @@ void WorkbenchPage::updateModbusUi()
     const bool quantityEnabled = !function.write || function.multiple;
     if (m_modbusQuantityEdit) {
         const int maximumQuantity = AppModbus::maximumQuantity(function);
-        m_modbusQuantityEdit->setEnabled(quantityEnabled);
+        m_modbusQuantityEdit->setEnabled(quantityEnabled && (!m_modbusProbeActive));
         m_modbusQuantityEdit->setValidator(new QIntValidator(1, maximumQuantity, m_modbusQuantityEdit));
         if (!quantityEnabled) {
             setNumberEditValue(m_modbusQuantityEdit, 1, 1, maximumQuantity);
@@ -183,7 +349,8 @@ void WorkbenchPage::updateModbusUi()
         }
     }
     if (m_modbusValuesEdit) {
-        m_modbusValuesEdit->setEnabled(needsValues);
+        const bool valuesEnabled = needsValues && !m_modbusProbeActive;
+        m_modbusValuesEdit->setEnabled(valuesEnabled);
         if (!needsValues) {
             m_modbusValuesEdit->setPlaceholderText(AppI18n::text("读取功能无需填写值"));
         } else if (function.coil) {

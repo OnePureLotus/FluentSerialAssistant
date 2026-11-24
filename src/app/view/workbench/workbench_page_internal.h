@@ -74,6 +74,7 @@ constexpr int FormLabelWidth = 84;
 constexpr int DefaultFileChunkSize = 256;
 constexpr int MaxChecksumSkipBytes = 65535;
 constexpr int DefaultFileChunkIntervalMs = 10;
+constexpr int DefaultModbusProbeIntervalMs = 500;
 constexpr int FileSendDrainPollMs = 5;
 constexpr int MaxFrameBufferBytes = 1024 * 1024;
 // The longest request an auto-reply rule can match. Every read rescans the

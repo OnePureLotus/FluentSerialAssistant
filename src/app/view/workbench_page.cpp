@@ -71,6 +71,8 @@ WorkbenchPage::WorkbenchPage(QWidget *parent, bool restoreSavedSession, bool all
     connect(&m_statsTimer, &QTimer::timeout, this, &WorkbenchPage::updateRateStats);
     m_fileSendTimer.setSingleShot(true);
     connect(&m_fileSendTimer, &QTimer::timeout, this, &WorkbenchPage::sendNextFileChunk);
+    m_modbusProbeTimer.setSingleShot(true);
+    connect(&m_modbusProbeTimer, &QTimer::timeout, this, &WorkbenchPage::sendModbusProbeStep);
     m_macroTimer.setSingleShot(true);
     connect(&m_macroTimer, &QTimer::timeout, this, &WorkbenchPage::handleMacroTimer);
     m_rxFrameIdleTimer.setSingleShot(true);
@@ -94,6 +96,8 @@ WorkbenchPage::WorkbenchPage(QWidget *parent, bool restoreSavedSession, bool all
         updateScriptActionState();
         updateAutoReplyTable(m_autoReplyList ? m_autoReplyList->currentRow() : -1);
         updateModbusUi();
+        updateModbusProbeUi(m_modbusProbeActive);
+        refreshModbusProbeIntervalVisibility();
         updateFrameControlState();
         updateAutoLogStatus();
         updateFileSendUi(m_fileSendFile.isOpen());
@@ -120,6 +124,8 @@ WorkbenchPage::WorkbenchPage(QWidget *parent, bool restoreSavedSession, bool all
     } else {
         updateFrameControlState();
         updateModbusUi();
+        updateModbusProbeUi(m_modbusProbeActive);
+        refreshModbusProbeIntervalVisibility();
         updateProtocolTemplateActionState();
         updateScriptActionState();
         updatePacketActionState();
@@ -170,6 +176,7 @@ WorkbenchPage::~WorkbenchPage()
         }
     }
     m_fileSendTimer.stop();
+    m_modbusProbeTimer.stop();
     if (m_fileSendFile.isOpen()) {
         m_fileSendFile.close();
     }

@@ -331,10 +331,16 @@ class WorkbenchPage : public AppPage, public AppControl::SessionControl
                                              int *trailingBytes = nullptr);
     void calculateChecksumForCurrentPayload();
     void setChecksumResultText(const QString &text);
-    AppModbus::RequestConfig currentModbusConfig() const;
-    QByteArray currentModbusFrame(bool *ok = nullptr);
+    AppModbus::RequestConfig currentModbusConfig(quint8 slaveOverride = 0xFF) const;
+    QByteArray currentModbusFrame(bool *ok = nullptr, quint8 slaveOverride = 0xFF, bool allowNonStandardSlaveId = false);
     void fillModbusRequest();
     void sendModbusRequest();
+    void sendModbusFrame(const QByteArray &frame, const QString &statusText);
+    void startModbusProbe();
+    void stopModbusProbe(const QString &message = QString());
+    void sendModbusProbeStep();
+    void updateModbusProbeUi(bool probing);
+    void refreshModbusProbeIntervalVisibility();
     void updateModbusUi();
     void updateModbusResponseStatus(const QByteArray &data);
     void setModbusStatusText(const QString &text);
@@ -530,6 +536,7 @@ class WorkbenchPage : public AppPage, public AppControl::SessionControl
     QTimer m_reconnectTimer;
     QTimer m_statsTimer;
     QTimer m_fileSendTimer;
+    QTimer m_modbusProbeTimer;
     QTimer m_macroTimer;
     QTimer m_rxFrameIdleTimer;
     QThread *m_scriptThread = nullptr;
@@ -548,6 +555,8 @@ class WorkbenchPage : public AppPage, public AppControl::SessionControl
     qint64 m_autoLogCurrentSize = 0;
     bool m_countersDirty = false;
     bool m_manualDisconnect = false;
+    bool m_modbusProbeActive = false;
+    int m_modbusProbeNextSlave = 0;
     bool m_macroRunning = false;
     bool m_macroStepsReloadPending = false;
     bool m_macroWaitingForResponse = false;
@@ -719,6 +728,9 @@ class WorkbenchPage : public AppPage, public AppControl::SessionControl
     FluentQt::LineEdit *m_protocolPayloadLengthEdit = nullptr;
     FluentQt::LineEdit *m_protocolChecksumStartEdit = nullptr;
     FluentQt::LineEdit *m_modbusSlaveEdit = nullptr;
+    FluentQt::CheckBox *m_modbusProbeCheck = nullptr;
+    QWidget *m_modbusProbeIntervalRow = nullptr;
+    FluentQt::LineEdit *m_modbusProbeIntervalEdit = nullptr;
     FluentQt::LineEdit *m_modbusAddressEdit = nullptr;
     FluentQt::LineEdit *m_modbusQuantityEdit = nullptr;
     FluentQt::LineEdit *m_loopIntervalEdit = nullptr;

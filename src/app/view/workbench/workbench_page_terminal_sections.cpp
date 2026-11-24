@@ -121,9 +121,8 @@ QWidget *WorkbenchPage::createTerminalSection()
 
     auto *clearButton = new TransparentToolButton(icon(FluentIcon::Broom), section);
     clearButton->setObjectName(QStringLiteral("terminalClearButton"));
-    clearButton->setAccessibleName(AppI18n::text("清空终端和计数"));
-    AppUi::setFluentToolTip(clearButton, AppI18n::text("清空终端和计数"));
-    section->headerLayout()->insertWidget(0, clearButton, 0, Qt::AlignVCenter);
+    clearButton->setAccessibleName(AppI18n::text("清日志"));
+    AppUi::setFluentToolTip(clearButton, AppI18n::text("清日志"));
     auto *searchButton = new TransparentToolButton(icon(FluentIcon::Search), section);
     searchButton->setObjectName(QStringLiteral("terminalSearchButton"));
     AppUi::setFluentToolTip(searchButton, AppI18n::text("搜索"));
@@ -131,10 +130,6 @@ QWidget *WorkbenchPage::createTerminalSection()
     AppUi::setFluentToolTip(plotButton, AppI18n::text("快速绘图"));
     auto *dataTableButton = new TransparentToolButton(icon(FluentIcon::View), section);
     AppUi::setFluentToolTip(dataTableButton, AppI18n::text("数据表格"));
-    auto *themeButton = new TransparentToolButton(icon(FluentIcon::Constract), section);
-    AppUi::setFluentToolTip(themeButton, AppI18n::text("切换主题"));
-    auto *languageButton = new TransparentToolButton(icon(FluentIcon::Language), section);
-    AppUi::setFluentToolTip(languageButton, AppI18n::text("切换语言"));
     auto *settingsButton = new TransparentToolButton(icon(FluentIcon::Setting), section);
     AppUi::setFluentToolTip(settingsButton, AppI18n::text("设置"));
     m_quickCommandsToggleButton = new TransparentToolButton(icon(FluentIcon::CommandPrompt), section);
@@ -142,8 +137,8 @@ QWidget *WorkbenchPage::createTerminalSection()
     m_quickCommandsToggleButton->setCheckable(true);
     connect(m_quickCommandsToggleButton, &TransparentToolButton::toggled, this,
             &WorkbenchPage::toggleQuickCommandsPanel);
-    for (ToolButton *button : {clearButton, searchButton, plotButton, dataTableButton, themeButton, languageButton,
-                               settingsButton, m_quickCommandsToggleButton}) {
+    for (ToolButton *button : {clearButton, searchButton, plotButton, dataTableButton, settingsButton,
+                               m_quickCommandsToggleButton}) {
         button->setProperty("terminalHeaderAction", true);
         button->setFixedSize(CompactControlHeight, CompactControlHeight);
         button->setIconSize(QSize(16, 16));
@@ -152,7 +147,7 @@ QWidget *WorkbenchPage::createTerminalSection()
                            "min-height: 32px; max-height: 32px; padding: 0px; }");
         FluentStyleSheet::setCustomStyleSheet(button, buttonStyle, buttonStyle);
     }
-    for (ToolButton *button : {searchButton, plotButton, dataTableButton, themeButton, languageButton, settingsButton,
+    for (ToolButton *button : {clearButton, searchButton, plotButton, dataTableButton, settingsButton,
                                m_quickCommandsToggleButton}) {
         actionLayout->addWidget(button);
     }
@@ -283,10 +278,7 @@ QWidget *WorkbenchPage::createTerminalSection()
         connect(scrollBar, &QScrollBar::valueChanged, this, &WorkbenchPage::positionTerminalSearchBar);
     }
 
-    connect(clearButton, &ToolButton::clicked, this, [this]() {
-        clearTerminal();
-        resetCounters();
-    });
+    connect(clearButton, &ToolButton::clicked, this, &WorkbenchPage::clearTerminal);
     connect(searchButton, &ToolButton::clicked, this, &WorkbenchPage::showTerminalSearchBar);
     connect(closeButton, &ToolButton::clicked, this, &WorkbenchPage::hideTerminalSearchBar);
     auto *findShortcut = new QShortcut(QKeySequence::Find, this);
@@ -298,15 +290,6 @@ QWidget *WorkbenchPage::createTerminalSection()
     m_terminalView->installEventFilter(this);
     connect(plotButton, &TransparentToolButton::clicked, this, &WorkbenchPage::showQuickPlotWindow);
     connect(dataTableButton, &TransparentToolButton::clicked, this, &WorkbenchPage::showDataTableWindow);
-    connect(themeButton, &TransparentToolButton::clicked, this, []() {
-        const Theme current = ThemeManager::instance()->effectiveTheme();
-        const Theme next = current == Theme::Dark ? Theme::Light : Theme::Dark;
-        FluentConfig::instance()->setThemeMode(next);
-        FluentConfig::instance()->save();
-        ThemeManager::instance()->setTheme(next);
-    });
-    connect(languageButton, &TransparentToolButton::clicked, this,
-            []() { AppI18n::applyLocale(AppI18n::toggledChineseEnglishLocaleName()); });
     connect(settingsButton, &TransparentToolButton::clicked, this, &WorkbenchPage::settingsRequested);
     connect(m_terminalSearchEdit, &LineEdit::textChanged, this, [this]() {
         resetTerminalSearchNavigation();

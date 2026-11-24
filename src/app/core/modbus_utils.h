@@ -23,6 +23,8 @@ struct RequestConfig
     quint16 address = 0;
     quint16 quantity = 1;
     QString valuesText;
+    /** When true, slaveId 0–255 is accepted (station probe); otherwise 1–247 only. */
+    bool allowNonStandardSlaveId = false;
 };
 
 struct BuildResult

@@ -332,6 +332,28 @@ class FrameCodecsTest : public QObject
         QVERIFY(!rejected.ok);
         QVERIFY(rejected.errorMessage.contains(QString::number(maximum)));
     }
+
+    void modbusProbeSlaveIds()
+    {
+        AppModbus::RequestConfig config;
+        config.functionKey = QStringLiteral("read-holding-registers");
+        config.address = 0;
+        config.quantity = 1;
+
+        config.slaveId = 0;
+        config.allowNonStandardSlaveId = false;
+        QVERIFY(!AppModbus::buildRequest(config).ok);
+
+        config.allowNonStandardSlaveId = true;
+        const auto zero = AppModbus::buildRequest(config);
+        QVERIFY2(zero.ok, qPrintable(zero.errorMessage));
+        QCOMPARE(static_cast<unsigned char>(zero.frame.at(0)), 0);
+
+        config.slaveId = 255;
+        const auto max = AppModbus::buildRequest(config);
+        QVERIFY2(max.ok, qPrintable(max.errorMessage));
+        QCOMPARE(static_cast<unsigned char>(max.frame.at(0)), 255);
+    }
 };
 
 QTEST_GUILESS_MAIN(FrameCodecsTest)
